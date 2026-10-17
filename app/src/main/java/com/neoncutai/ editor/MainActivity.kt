@@ -1,8 +1,15 @@
 package com.neoncutai.editor
 
+import android.net.Uri
 import android.os.Bundle
+import android.widget.MediaController
+import android.widget.VideoView
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -11,18 +18,18 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-// Модель нашего проекта
 data class Project(val id: String, val name: String)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            // Наша неоновая тема
             MaterialTheme(
                 colorScheme = darkColorScheme(
                     background = Color(0xFF090909),
@@ -30,15 +37,24 @@ class MainActivity : ComponentActivity() {
                     primary = Color(0xFF00FFFF)
                 )
             ) {
-                ProjectScreen()
+                var selectedProject by remember { mutableStateOf<Project?>(null) }
+                
+                if (selectedProject == null) {
+                    ProjectScreen(onProjectClick = { selectedProject = it })
+                } else {
+                    EditorScreen(
+                        project = selectedProject!!, 
+                        onBackClick = { selectedProject = null }
+                    )
+                }
             }
         }
     }
 }
 
+// ЭКРАН 1: СПИСОК ПРОЕКТОВ (без изменений)
 @Composable
-fun ProjectScreen() {
-    // Состояния для хранения списка проектов и окна создания
+fun ProjectScreen(onProjectClick: (Project) -> Unit) {
     var projects by remember { mutableStateOf(listOf<Project>()) }
     var showDialog by remember { mutableStateOf(false) }
     var newProjectName by remember { mutableStateOf("") }
@@ -51,27 +67,21 @@ fun ProjectScreen() {
             }
         },
         floatingActionButton = {
-            // Кнопка создания проекта (+)
-            FloatingActionButton(
-                onClick = { showDialog = true },
-                containerColor = Color(0xFFFF00FF)
-            ) {
+            FloatingActionButton(onClick = { showDialog = true }, containerColor = Color(0xFFFF00FF)) {
                 Text("+", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
             }
         }
     ) { paddingValues ->
         Column(modifier = Modifier.padding(paddingValues).fillMaxSize()) {
             if (projects.isEmpty()) {
-                // Если проектов нет, показываем текст
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Нет проектов\nНажмите кнопку +", color = Color.Gray, fontSize = 18.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    Text("Нет проектов\nНажмите +", color = Color.Gray, fontSize = 18.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                 }
             } else {
-                // Если есть, показываем список
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
                     items(projects) { project ->
                         Card(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).clickable { onProjectClick(project) },
                             colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A1A))
                         ) {
                             Row(
@@ -79,9 +89,7 @@ fun ProjectScreen() {
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(project.name, color = Color.White, fontSize = 18.sp, modifier = Modifier.weight(1f))
-                                TextButton(onClick = {
-                                    projects = projects.filter { it.id != project.id }
-                                }) {
+                                TextButton(onClick = { projects = projects.filter { it.id != project.id } }) {
                                     Text("Удалить", color = Color(0xFFFF00FF))
                                 }
                             }
@@ -92,7 +100,6 @@ fun ProjectScreen() {
         }
     }
 
-    // Диалоговое окно для создания проекта
     if (showDialog) {
         AlertDialog(
             onDismissRequest = { showDialog = false },
@@ -117,10 +124,76 @@ fun ProjectScreen() {
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showDialog = false }) {
-                    Text("Отмена", color = Color.Gray)
-                }
+                TextButton(onClick = { showDialog = false }) { Text("Отмена", color = Color.Gray) }
             }
         )
+    }
+}
+
+// ЭКРАН 2: РЕДАКТОР С ВИДЕО
+@Composable
+fun EditorScreen(project: Project, onBackClick: () -> Unit) {
+    var selectedVideoUri by remember { mutableStateOf<Uri?>(null) }
+    val context = LocalContext.current
+
+    // Лончер для выбора видео из памяти телефона
+    val videoPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        selectedVideoUri = uri
+    }
+
+    Column(modifier = Modifier.fillMaxSize().background(Color(0xFF090909))) {
+        // Верхняя панель
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TextButton(onClick = onBackClick) {
+                Text("< Назад", color = Color(0xFF00FFFF), fontSize = 16.sp)
+            }
+            Spacer(modifier = Modifier.width(16.dp))
+            Text(project.name, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            
+            // Кнопка импорта
+            Button(
+                onClick = { videoPicker.launch("video/*") },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FFFF))
+            ) {
+                Text("Импорт", color = Color.Black, fontWeight = FontWeight.Bold)
+            }
+        }
+
+        // Окно предпросмотра
+        Box(
+            modifier = Modifier.fillMaxWidth().weight(1f).padding(16.dp).background(Color.Black),
+            contentAlignment = Alignment.Center
+        ) {
+            if (selectedVideoUri == null) {
+                Text("Окно предпросмотра\n(Нажмите 'Импорт')", color = Color.DarkGray, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            } else {
+                // Встроенный видеоплеер Android
+                AndroidView(
+                    factory = { ctx ->
+                        VideoView(ctx).apply {
+                            setVideoURI(selectedVideoUri)
+                            val mediaController = MediaController(ctx)
+                            mediaController.setAnchorView(this)
+                            setMediaController(mediaController)
+                            start()
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
+
+        // Тайм-линия
+        Box(
+            modifier = Modifier.fillMaxWidth().height(120.dp).background(Color(0xFF1A1A1A)).padding(8.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("Здесь будет тайм-линия", color = Color.Gray)
+        }
     }
 }
