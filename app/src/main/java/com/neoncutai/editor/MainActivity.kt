@@ -117,7 +117,41 @@ class CloudAiEngine : AiEngine {
                 history.takeLast(10).forEach { msg -> messages.put(JSONObject().put("role", if (msg.isUser) "user" else "assistant").put("content", msg.text)) }
                 messages.put(JSONObject().put("role", "user").put("content", prompt))
 
-                val json = JSONObject().put("model", "llama-3.3-70b-versatile").put("messages", messages)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                val json = JSONObject().// Рекомендуемая замена — мощная и бесплатная:
+put("model", "openai/gpt-oss-120b").put("messages", messages)
                 val request = Request.Builder().url("https://api.groq.com/openai/v1/chat/completions").addHeader("Authorization", "Bearer $apiKey").post(json.toString().toRequestBody("application/json".toMediaType())).build()
                 
                 val response = client.newCall(request).execute()
