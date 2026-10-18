@@ -378,6 +378,15 @@ fun EditorScreen(initialProject: Project, onBackClick: (Project) -> Unit) {
     
     var showAiDialog by remember { mutableStateOf(false) }
     var allowCloud by remember { mutableStateOf(false) }
+var allowWebSearch by remember { mutableStateOf(false) }
+var apiKey by remember { mutableStateOf(context.getSharedPreferences("neon_prefs", Context.MODE_PRIVATE).getString("gemini_key", "") ?: "") }
+var pendingProposal by remember(project.id) { mutableStateOf<AiProposal?>(null) }
+var aiMessages by remember(project.id) { mutableStateOf(loadChatHistory(context, project.id)) }
+var isAiLoading by remember(project.id) { mutableStateOf(false) }
+var activeAiJob by remember(project.id) { mutableStateOf<Job?>(null) }
+var currentRequestId by remember(project.id) { mutableStateOf<String?>(null) }
+var saveErrorMessage by remember(project.id) { mutableStateOf<String?>(null) }
+var recoveryFailed by remember(project.id) { mutableStateOf(false) }
     var apiKey by remember { mutableStateOf(context.getSharedPreferences("neon_prefs", Context.MODE_PRIVATE).getString("gemini_key", "") ?: "") }
     
     var pendingProposal by remember(project.id) { mutableStateOf<AiProposal?>(null) }
@@ -671,4 +680,5 @@ if (allowCloud) {
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Закрыть", color = Color.Gray) } }
     )
+}
 }
