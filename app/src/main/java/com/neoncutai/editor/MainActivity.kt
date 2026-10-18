@@ -681,4 +681,3 @@ if (allowCloud) {
         confirmButton = { TextButton(onClick = onDismiss) { Text("Закрыть", color = Color.Gray) } }
     )
 }
-}
