@@ -80,17 +80,17 @@ interface AiEngine { suspend fun generateResponse(prompt: String, history: List<
 
 class LocalAiEngine : AiEngine {
     override suspend fun generateResponse(prompt: String, history: List<ChatMessage>): AiResponse {
-        return when {
-            prompt.contains("субтитр", ignoreCase = true) -> {
-                val proposal = AiProposal(ActionType.ADD_SUBTITLES, "Демо: добавить субтитры.")
-                AiResponse("Локальный ИИ: могу добавить субтитры. Подтвердить? (Демо)", proposal)
-            }
-            prompt.contains("пауз", ignoreCase = true) -> {
-                val proposal = AiProposal(ActionType.REMOVE_SILENCE, "Демо: убрать паузы.")
-                AiResponse("Локальный ИИ: могу убрать паузы. Подтвердить? (Демо)", proposal)
-            }
-            else -> AiResponse("Локальный ИИ (демо). Попроси добавить субтитры или убрать паузы.")
-        }
+                    return when {
+    prompt.contains("субтитр", ignoreCase = true) -> {
+        val proposal = AiProposal(actionType = ActionType.ADD_SUBTITLES, explanation = "Демо: добавить субтитры.")
+        AiResponse("Локальный ИИ: могу добавить субтитры. Подтвердить? (Демо)", proposal)
+    }
+    prompt.contains("пауз", ignoreCase = true) -> {
+        val proposal = AiProposal(actionType = ActionType.REMOVE_SILENCE, explanation = "Демо: убрать паузы.")
+        AiResponse("Локальный ИИ: могу убрать паузы. Подтвердить? (Демо)", proposal)
+    }
+    else -> AiResponse("Локальный ИИ (демо). Попроси добавить субтитры или убрать паузы.")
+}
     }
 }
 
