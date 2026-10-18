@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.widget.MediaController
 import android.widget.VideoView
+import android.media.MediaPlayer
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -213,8 +214,43 @@ fun ProjectScreen(
     }
 }
 @Composable
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 fun EditorScreen(initialProject: Project, onBackClick: (Project) -> Unit) {
     var project by remember { mutableStateOf(initialProject) }
+var mediaPlayerInstance by remember { mutableStateOf<MediaPlayer?>(null) } }
     var isPlaying by remember { mutableStateOf(false) }
     var videoDuration by remember { mutableStateOf(0) }
     var videoPosition by remember { mutableStateOf(0) }
@@ -355,23 +391,51 @@ fun EditorScreen(initialProject: Project, onBackClick: (Project) -> Unit) {
                     
                     Spacer(modifier = Modifier.width(8.dp))
                     
-                    listOf(0.5f, 1.0f, 1.5f, 2.0f).forEach { speed ->
-                        TextButton(
-                            onClick = { 
-                                playbackSpeed = speed
-                                videoViewInstance?.let { vv ->
-                                    try {
-                                        val params = vv.playbackParams
-                                        params.speed = speed
-                                        vv.playbackParams = params
-                                    } catch (e: Exception) {}
-                                }
-                            },
-                            colors = ButtonDefaults.textButtonColors(
-                                contentColor = if (playbackSpeed == speed) Color(0xFF00FFFF) else Color.Gray
-                            )
-                        ) { Text("${speed}x", fontSize = 12.sp) }
-                    }
+                    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Spacer(modifier = Modifier.width(8.dp))
+
+listOf(0.5f, 1.0f, 1.5f, 2.0f).forEach { speed ->
+    TextButton(
+        onClick = { 
+            playbackSpeed = speed
+            mediaPlayerInstance?.let { mp ->
+                try {
+                    val params = mp.playbackParams
+                    params.speed = speed
+                    mp.playbackParams = params
+                } catch (e: Exception) {}
+            }
+        },
+        colors = ButtonDefaults.textButtonColors(
+            contentColor = if (playbackSpeed == speed) Color(0xFF00FFFF) else Color.Gray
+        )
+    ) { Text("${speed}x", fontSize = 12.sp) }
+}
                     
                     Spacer(modifier = Modifier.width(16.dp))
                     
