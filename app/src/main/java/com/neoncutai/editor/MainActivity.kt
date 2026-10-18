@@ -439,15 +439,16 @@ Column(modifier = Modifier.fillMaxSize().background(Color(0xFF090909)).statusBar
                 }
             }, modifier = Modifier.fillMaxSize())
 
-            if (project.effect != null) {
-                if (project.effect.startsWith("#")) {
-                    Box(modifier = Modifier.fillMaxSize().background(Color(android.graphics.Color.parseColor(project.effect)).copy(alpha = 0.4f)))
-                } else if (project.effect == "Neon") {
-                    Box(modifier = Modifier.fillMaxSize().border(3.dp, Color(0xFF00FFFF)).background(Color(0xFF00FFFF).copy(alpha = 0.15f)))
-                } else if (project.effect == "B&W") {
-                    Box(modifier = Modifier.fillMaxSize().background(Color.Gray.copy(alpha = 0.8f)))
-                }
-            }
+            val currentEffect = project.effect
+if (currentEffect != null) {
+    if (currentEffect.startsWith("#")) {
+        Box(modifier = Modifier.fillMaxSize().background(Color(android.graphics.Color.parseColor(currentEffect)).copy(alpha = 0.4f)))
+    } else if (currentEffect == "Neon") {
+        Box(modifier = Modifier.fillMaxSize().border(3.dp, Color(0xFF00FFFF)).background(Color(0xFF00FFFF).copy(alpha = 0.15f)))
+    } else if (currentEffect == "B&W") {
+        Box(modifier = Modifier.fillMaxSize().background(Color.Gray.copy(alpha = 0.8f)))
+    }
+}
 
             project.texts.forEach { text -> Text(text = text, color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 50.dp)) }
         }
