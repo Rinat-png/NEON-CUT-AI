@@ -92,16 +92,15 @@ class LocalAiEngine : AiEngine {
 
 class CloudAiEngine : AiEngine {
     override suspend fun generateResponse(prompt: String, history: List<ChatMessage>, apiKey: String): AiResponse {
-        if (apiKey.isBlank()) return AiResponse(text = "Ошибка: Введите API-ключ Google Gemini в поле выше.", errorMessage = "Ключ пуст")
+        if (apiKey.isBlank()) return AiResponse(text = "Ошибка: Введите API-ключ Groq в поле выше.", errorMessage = "Ключ пуст")
         
         return withContext(Dispatchers.IO) {
             try {
                 val client = OkHttpClient()
                 val json = JSONObject().apply {
-                    put("contents", JSONArray().apply {
-                        put(JSONObject().apply {
-                            put("parts", JSONArray().apply { put(JSONObject().put("text", prompt)) })
-                        })
+                    put("model", "llama-3.3-70b-versatile") 
+                    put("messages", JSONArray().apply {
+                        put(JSONObject().apply { put("role", "user"); put("content", prompt) })
                     })
                 }
 
@@ -109,7 +108,9 @@ class CloudAiEngine : AiEngine {
                 val body = json.toString().toRequestBody(mediaType)
 
                 val request = Request.Builder()
-                    .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey")
+                    .url("https://api.groq.com/openai/v1/chat/completions")
+                    .addHeader("Authorization", "Bearer $apiKey")
+                    .addHeader("Content-Type", "application/json")
                     .post(body)
                     .build()
 
@@ -117,13 +118,12 @@ class CloudAiEngine : AiEngine {
                 val responseBody = response.body?.string() ?: ""
                 
                 if (!response.isSuccessful) {
-                    return@withContext AiResponse(text = "Ошибка сети: проверьте ключ.", errorMessage = "Код ${response.code}")
+                    return@withContext AiResponse(text = "Ошибка сети: проверьте ключ Groq.", errorMessage = "Код ${response.code}")
                 }
 
                 val responseJson = JSONObject(responseBody)
-                val text = responseJson.getJSONArray("candidates").getJSONObject(0)
-                    .getJSONObject("content").getJSONArray("parts")
-                    .getJSONObject(0).getString("text")
+                val text = responseJson.getJSONArray("choices").getJSONObject(0)
+                    .getJSONObject("message").getString("content")
                 
                 AiResponse(text = text.trim())
             } catch (e: Exception) {
@@ -324,6 +324,40 @@ fun ProjectScreen(projects: List<Project>, onProjectClick: (Project) -> Unit, on
     }
 }
 @Composable
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 fun EditorScreen(initialProject: Project, onBackClick: (Project) -> Unit) {
     val context = LocalContext.current
     var project by remember { mutableStateOf(initialProject) }
@@ -586,14 +620,14 @@ fun AiAssistantDialog(
         onDismissRequest = onDismiss, title = { Text("ИИ-Ассистент", color = Color(0xFFFF00FF), fontWeight = FontWeight.Bold) },
         text = {
             Column(modifier = Modifier.height(320.dp).fillMaxWidth()) {
-                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Облачный ИИ (Gemini)", color = Color.Gray, fontSize = 11.sp, modifier = Modifier.weight(1f))
-                    Switch(checked = allowCloud, onCheckedChange = onCloudChange, colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF00FFFF)))
-                }
-                if (allowCloud) {
-                    OutlinedTextField(
-                        value = apiKey, onValueChange = onApiKeyChange,
-                        label = { Text("API Key (Google AI Studio)", fontSize = 10.sp) },
+Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+    Text("Облачный ИИ (Groq)", color = Color.Gray, fontSize = 11.sp, modifier = Modifier.weight(1f))
+    Switch(checked = allowCloud, onCheckedChange = onCloudChange, colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF00FFFF)))
+}
+if (allowCloud) {
+    OutlinedTextField(
+        value = apiKey, onValueChange = onApiKeyChange,
+        label = { Text("Groq API Key", fontSize = 10.sp) },
                         modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
                         singleLine = true,
                         textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
