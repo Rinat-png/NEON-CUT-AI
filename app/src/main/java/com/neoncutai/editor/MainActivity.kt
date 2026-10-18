@@ -97,11 +97,28 @@ class CloudAiEngine : AiEngine {
         return withContext(Dispatchers.IO) {
             try {
                 val client = OkHttpClient()
-                val json = JSONObject().apply {
-                    put("model", "llama-3.1-8b-instant") 
-                    put("messages", JSONArray().apply {
-                        put(JSONObject().apply { put("role", "user"); put("content", prompt) })
+                val messagesArray = JSONArray()
+                
+                messagesArray.put(JSONObject().apply {
+                    put("role", "system")
+                    put("content", "Ты — умный ИИ-ассистент внутри мобильного видеоредактора NEON CUT AI. Твоя задача — помогать пользователю с монтажом, предлагать идеи для видео, эффекты и тексты. Отвечай кратко, дружелюбно и по делу. Если пользователь просит добавить субтитры или убрать паузы, скажи, что ты можешь предложить это действие, и жди подтверждения.")
+                })
+
+                history.forEach { msg ->
+                    messagesArray.put(JSONObject().apply {
+                        put("role", if (msg.isUser) "user" else "assistant")
+                        put("content", msg.text)
                     })
+                }
+
+                messagesArray.put(JSONObject().apply {
+                    put("role", "user")
+                    put("content", prompt)
+                })
+
+                val json = JSONObject().apply {
+                    put("model", "llama3-8b-8192") // Бесплатная и быстрая модель
+                    put("messages", messagesArray)
                 }
 
                 val mediaType = "application/json; charset=utf-8".toMediaType()
@@ -135,10 +152,10 @@ class CloudAiEngine : AiEngine {
 
 class AiManager(private val localEngine: AiEngine, private val cloudEngine: AiEngine) {
     suspend fun getResponse(prompt: String, history: List<ChatMessage>, allowCloud: Boolean, apiKey: String): AiResponse {
-        if (allowCloud) {
-            return cloudEngine.generateResponse(prompt, history, apiKey)
+        return if (allowCloud) {
+            cloudEngine.generateResponse(prompt, history, apiKey)
         } else {
-            return localEngine.generateResponse(prompt, history, apiKey)
+            localEngine.generateResponse(prompt, history, apiKey)
         }
     }
 }
@@ -323,40 +340,6 @@ fun ProjectScreen(projects: List<Project>, onProjectClick: (Project) -> Unit, on
         )
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 @Composable
 fun EditorScreen(initialProject: Project, onBackClick: (Project) -> Unit) {
     val context = LocalContext.current
@@ -378,7 +361,6 @@ fun EditorScreen(initialProject: Project, onBackClick: (Project) -> Unit) {
     
     var showAiDialog by remember { mutableStateOf(false) }
     var allowCloud by remember { mutableStateOf(false) }
-    var allowWebSearch by remember { mutableStateOf(false) }
     var apiKey by remember { mutableStateOf(context.getSharedPreferences("neon_prefs", Context.MODE_PRIVATE).getString("gemini_key", "") ?: "") }
     
     var pendingProposal by remember(project.id) { mutableStateOf<AiProposal?>(null) }
@@ -509,50 +491,49 @@ Column(modifier = Modifier.fillMaxSize().background(Color(0xFF090909))) {
             }
         }
     }
-        Column(modifier = Modifier.fillMaxWidth().height(80.dp).background(Color(0xFF121212)).padding(horizontal = 16.dp, vertical = 8.dp)) {
-            Row(modifier = Modifier.fillMaxWidth().height(28.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Видео", color = Color.Gray, fontSize = 9.sp, modifier = Modifier.width(40.dp))
-                Box(modifier = Modifier.fillMaxHeight().width(if (project.videoUri != null) 150.dp else 80.dp).background(Color(0xFF00FFFF).copy(alpha = 0.2f), RoundedCornerShape(4.dp)).border(1.dp, Color(0xFF00FFFF), RoundedCornerShape(4.dp)), contentAlignment = Alignment.Center) {
-                    if (project.videoUri != null) Text(formatTime(endTrim - startTrim), color = Color.White, fontSize = 10.sp) else Text("Пусто", color = Color.DarkGray, fontSize = 10.sp)
-                }
-            }
-            Spacer(modifier = Modifier.height(4.dp))
-            Row(modifier = Modifier.fillMaxWidth().height(28.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Аудио", color = Color.Gray, fontSize = 9.sp, modifier = Modifier.width(40.dp))
-                Box(modifier = Modifier.fillMaxHeight().width(if (project.audioUri != null) 180.dp else 80.dp).background(Color(0xFFFF00FF).copy(alpha = 0.2f), RoundedCornerShape(4.dp)).border(1.dp, Color(0xFFFF00FF), RoundedCornerShape(4.dp)), contentAlignment = Alignment.Center) {
-                    if (project.audioUri != null) Text("Музыка", color = Color.White, fontSize = 10.sp) else Text("Нет", color = Color.DarkGray, fontSize = 10.sp)
-                }
+    Column(modifier = Modifier.fillMaxWidth().height(80.dp).background(Color(0xFF121212)).padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Row(modifier = Modifier.fillMaxWidth().height(28.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Видео", color = Color.Gray, fontSize = 9.sp, modifier = Modifier.width(40.dp))
+            Box(modifier = Modifier.fillMaxHeight().width(if (project.videoUri != null) 150.dp else 80.dp).background(Color(0xFF00FFFF).copy(alpha = 0.2f), RoundedCornerShape(4.dp)).border(1.dp, Color(0xFF00FFFF), RoundedCornerShape(4.dp)), contentAlignment = Alignment.Center) {
+                if (project.videoUri != null) Text(formatTime(endTrim - startTrim), color = Color.White, fontSize = 10.sp) else Text("Пусто", color = Color.DarkGray, fontSize = 10.sp)
             }
         }
-
-        Row(modifier = Modifier.fillMaxWidth().background(Color(0xFF090909)).padding(vertical = 12.dp, horizontal = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { videoPicker.launch("video/*") }) {
-                Box(modifier = Modifier.size(44.dp).background(Color(0xFF1A1A1A), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) { Text("📹", fontSize = 20.sp) }
-                Text("Видео", color = Color.White, fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
-            }
-            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { audioPicker.launch("audio/*") }) {
-                Box(modifier = Modifier.size(44.dp).background(Color(0xFF1A1A1A), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) { Text("🎵", fontSize = 20.sp) }
-                Text("Музыка", color = Color.White, fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
-            }
-            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { showTextDialog = true }) {
-                Box(modifier = Modifier.size(44.dp).background(Color(0xFF1A1A1A), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) { Text("T", color = Color(0xFF00FFFF), fontSize = 20.sp, fontWeight = FontWeight.Bold) }
-                Text("Текст", color = Color.White, fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
-            }
-            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { showAiDialog = true }) {
-                Box(modifier = Modifier.size(44.dp).background(Color(0xFF1A1A1A), RoundedCornerShape(12.dp)).border(1.dp, Color(0xFFFF00FF), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) { Text("✨", fontSize = 20.sp) }
-                Text("ИИ", color = Color.White, fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
+        Spacer(modifier = Modifier.height(4.dp))
+        Row(modifier = Modifier.fillMaxWidth().height(28.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Аудио", color = Color.Gray, fontSize = 9.sp, modifier = Modifier.width(40.dp))
+            Box(modifier = Modifier.fillMaxHeight().width(if (project.audioUri != null) 180.dp else 80.dp).background(Color(0xFFFF00FF).copy(alpha = 0.2f), RoundedCornerShape(4.dp)).border(1.dp, Color(0xFFFF00FF), RoundedCornerShape(4.dp)), contentAlignment = Alignment.Center) {
+                if (project.audioUri != null) Text("Музыка", color = Color.White, fontSize = 10.sp) else Text("Нет", color = Color.DarkGray, fontSize = 10.sp)
             }
         }
-    } // КОНЕЦ ОСНОВНОГО COLUMN
-
-    if (showTextDialog) {
-        AlertDialog(onDismissRequest = { showTextDialog = false }, title = { Text("Добавить текст", color = Color.White) }, text = { OutlinedTextField(value = newText, onValueChange = { newText = it }, label = { Text("Текст") }, singleLine = true) }, confirmButton = { TextButton(onClick = { if (newText.isNotBlank()) { project = project.copy(texts = project.texts + newText); newText = ""; showTextDialog = false } }) { Text("Добавить", color = Color(0xFF00FFFF)) } }, dismissButton = { TextButton(onClick = { showTextDialog = false }) { Text("Отмена", color = Color.Gray) } })
     }
 
-    if (isExporting) {
-        AlertDialog(onDismissRequest = { }, title = { Text("Экспорт видео", color = Color.White) }, text = { Column { Text(text = exportFact, color = Color(0xFF00FFFF), fontSize = 14.sp, modifier = Modifier.padding(bottom = 16.dp)); LinearProgressIndicator(progress = exportProgress, modifier = Modifier.fillMaxWidth(), color = Color(0xFF00FF00), trackColor = Color.DarkGray) } }, confirmButton = { if (exportProgress >= 1f) { TextButton(onClick = { isExporting = false }) { Text("Готово", color = Color(0xFF00FF00)) } } })
+    Row(modifier = Modifier.fillMaxWidth().background(Color(0xFF090909)).padding(vertical = 12.dp, horizontal = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { videoPicker.launch("video/*") }) {
+            Box(modifier = Modifier.size(44.dp).background(Color(0xFF1A1A1A), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) { Text("📹", fontSize = 20.sp) }
+            Text("Видео", color = Color.White, fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { audioPicker.launch("audio/*") }) {
+            Box(modifier = Modifier.size(44.dp).background(Color(0xFF1A1A1A), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) { Text("🎵", fontSize = 20.sp) }
+            Text("Музыка", color = Color.White, fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { showTextDialog = true }) {
+            Box(modifier = Modifier.size(44.dp).background(Color(0xFF1A1A1A), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) { Text("T", color = Color(0xFF00FFFF), fontSize = 20.sp, fontWeight = FontWeight.Bold) }
+            Text("Текст", color = Color.White, fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { showAiDialog = true }) {
+            Box(modifier = Modifier.size(44.dp).background(Color(0xFF1A1A1A), RoundedCornerShape(12.dp)).border(1.dp, Color(0xFFFF00FF), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) { Text("✨", fontSize = 20.sp) }
+            Text("ИИ", color = Color.White, fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
+        }
     }
+}
 
+if (showTextDialog) {
+    AlertDialog(onDismissRequest = { showTextDialog = false }, title = { Text("Добавить текст", color = Color.White) }, text = { OutlinedTextField(value = newText, onValueChange = { newText = it }, label = { Text("Текст") }, singleLine = true) }, confirmButton = { TextButton(onClick = { if (newText.isNotBlank()) { project = project.copy(texts = project.texts + newText); newText = ""; showTextDialog = false } }) { Text("Добавить", color = Color(0xFF00FFFF)) } }, dismissButton = { TextButton(onClick = { showTextDialog = false }) { Text("Отмена", color = Color.Gray) } })
+}
+
+if (isExporting) {
+    AlertDialog(onDismissRequest = { }, title = { Text("Экспорт видео", color = Color.White) }, text = { Column { Text(text = exportFact, color = Color(0xFF00FFFF), fontSize = 14.sp, modifier = Modifier.padding(bottom = 16.dp)); LinearProgressIndicator(progress = exportProgress, modifier = Modifier.fillMaxWidth(), color = Color(0xFF00FF00), trackColor = Color.DarkGray) } }, confirmButton = { if (exportProgress >= 1f) { TextButton(onClick = { isExporting = false }) { Text("Готово", color = Color(0xFF00FF00)) } } })
+}
     if (showAiDialog) {
         AiAssistantDialog(
             onDismiss = { showAiDialog = false }, aiMessages = aiMessages, isAiLoading = isAiLoading,
@@ -623,6 +604,7 @@ Column(modifier = Modifier.fillMaxSize().background(Color(0xFF090909))) {
         )
     }
 }
+
 @Composable
 fun AiAssistantDialog(
     onDismiss: () -> Unit, aiMessages: List<ChatMessage>, isAiLoading: Boolean,
@@ -641,14 +623,14 @@ fun AiAssistantDialog(
         onDismissRequest = onDismiss, title = { Text("ИИ-Ассистент", color = Color(0xFFFF00FF), fontWeight = FontWeight.Bold) },
         text = {
             Column(modifier = Modifier.height(320.dp).fillMaxWidth()) {
-Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-    Text("Облачный ИИ (Groq)", color = Color.Gray, fontSize = 11.sp, modifier = Modifier.weight(1f))
-    Switch(checked = allowCloud, onCheckedChange = onCloudChange, colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF00FFFF)))
-}
-if (allowCloud) {
-    OutlinedTextField(
-        value = apiKey, onValueChange = onApiKeyChange,
-        label = { Text("Groq API Key", fontSize = 10.sp) },
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Облачный ИИ (Groq)", color = Color.Gray, fontSize = 11.sp, modifier = Modifier.weight(1f))
+                    Switch(checked = allowCloud, onCheckedChange = onCloudChange, colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF00FFFF)))
+                }
+                if (allowCloud) {
+                    OutlinedTextField(
+                        value = apiKey, onValueChange = onApiKeyChange,
+                        label = { Text("Groq API Key", fontSize = 10.sp) },
                         modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
                         singleLine = true,
                         textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
