@@ -98,7 +98,7 @@ class CloudAiEngine : AiEngine {
             try {
                 val client = OkHttpClient()
                 val json = JSONObject().apply {
-                    put("model", "llama-3.3-70b-versatile") 
+                    put("model", "llama-3.1-8b-instant") 
                     put("messages", JSONArray().apply {
                         put(JSONObject().apply { put("role", "user"); put("content", prompt) })
                     })
@@ -425,46 +425,65 @@ fun EditorScreen(initialProject: Project, onBackClick: (Project) -> Unit) {
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize().background(Color(0xFF090909))) {
-Row(modifier = Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-    TextButton(onClick = { onBackClick(project.copy(startTrim = startTrim, endTrim = endTrim)) }) { Text("< Назад", color = Color(0xFF00FFFF), fontSize = 14.sp) }
-    Button(onClick = { isExporting = true }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FF00)), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp), modifier = Modifier.height(32.dp)) { Text("Экспорт", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
-}
-
-Box(modifier = Modifier.fillMaxWidth().weight(1f).padding(16.dp).background(Color.Black), contentAlignment = Alignment.Center) {
-    if (project.videoUri == null) {
-        Text("Окно предпросмотра\n(Импортируйте видео)", color = Color.DarkGray, textAlign = TextAlign.Center)
-    } else {
-        AndroidView(factory = { ctx ->
-            VideoView(ctx).apply {
-                setVideoURI(Uri.parse(project.videoUri))
-                setOnPreparedListener { mp ->
-                    videoDuration = mp.duration; if (endTrim == 0) endTrim = mp.duration
-                    videoViewInstance = this; mediaPlayerInstance = mp; seekTo(startTrim)
-                    try { val params = mp.playbackParams; params.speed = playbackSpeed; mp.playbackParams = params } catch (e: Exception) {}
-                    start(); isPlaying = true
-                }
-                setOnCompletionListener { isPlaying = false }
-                start()
+    Column(modifier = Modifier.fillMaxSize().background(Color(0xFF090909
+    // ТАЙМ-ЛИНИЯ
+    Column(
+        modifier = Modifier.fillMaxWidth().height(80.dp).background(Color(0xFF121212)).padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        // Дорожка Видео
+        Row(modifier = Modifier.fillMaxWidth().height(28.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Видео", color = Color.Gray, fontSize = 9.sp, modifier = Modifier.width(40.dp))
+            Box(modifier = Modifier.fillMaxHeight().width(if (project.videoUri != null) 150.dp else 80.dp).background(Color(0xFF00FFFF).copy(alpha = 0.2f), RoundedCornerShape(4.dp)).border(1.dp, Color(0xFF00FFFF), RoundedCornerShape(4.dp)), contentAlignment = Alignment.Center) {
+                if (project.videoUri != null) Text(formatTime(endTrim - startTrim), color = Color.White, fontSize = 10.sp) else Text("Пусто", color = Color.DarkGray, fontSize = 10.sp)
             }
-        }, modifier = Modifier.fillMaxSize())
-        project.texts.forEach { text -> Text(text = text, color = Color(0xFF00FFFF), fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 50.dp)) }
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        // Дорожка Аудио
+        Row(modifier = Modifier.fillMaxWidth().height(28.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Аудио", color = Color.Gray, fontSize = 9.sp, modifier = Modifier.width(40.dp))
+            Box(modifier = Modifier.fillMaxHeight().width(if (project.audioUri != null) 180.dp else 80.dp).background(Color(0xFFFF00FF).copy(alpha = 0.2f), RoundedCornerShape(4.dp)).border(1.dp, Color(0xFFFF00FF), RoundedCornerShape(4.dp)), contentAlignment = Alignment.Center) {
+                if (project.audioUri != null) Text("Музыка", color = Color.White, fontSize = 10.sp) else Text("Нет", color = Color.DarkGray, fontSize = 10.sp)
+            }
+        }
+    }
+
+    // НИЖНЯЯ ПАНЕЛЬ ИНСТРУМЕНТОВ (CapCut style)
+    Row(
+        modifier = Modifier.fillMaxWidth().background(Color(0xFF090909)).padding(vertical = 12.dp, horizontal = 16.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Видео
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { videoPicker.launch("video/*") }) {
+            Box(modifier = Modifier.size(44.dp).background(Color(0xFF1A1A1A), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+                Text("📹", fontSize = 20.sp)
+            }
+            Text("Видео", color = Color.White, fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
+        }
+        // Музыка
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { audioPicker.launch("audio/*") }) {
+            Box(modifier = Modifier.size(44.dp).background(Color(0xFF1A1A1A), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+                Text("🎵", fontSize = 20.sp)
+            }
+            Text("Музыка", color = Color.White, fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
+        }
+        // Текст
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { showTextDialog = true }) {
+            Box(modifier = Modifier.size(44.dp).background(Color(0xFF1A1A1A), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+                Text("T", color = Color(0xFF00FFFF), fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            }
+            Text("Текст", color = Color.White, fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
+        }
+        // ИИ
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { showAiDialog = true }) {
+            Box(modifier = Modifier.size(44.dp).background(Color(0xFF1A1A1A), RoundedCornerShape(12.dp)).border(1.dp, Color(0xFFFF00FF), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+                Text("✨", fontSize = 20.sp)
+            }
+            Text("ИИ", color = Color.White, fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
+        }
     }
 }
-    if (project.videoUri != null) {
-        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                Button(onClick = { videoViewInstance?.let { if (it.isPlaying) { it.pause(); isPlaying = false } else { it.start(); isPlaying = true } } }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A1A1A)), modifier = Modifier.border(1.dp, Color(0xFF00FFFF), RoundedCornerShape(20.dp))) { Text(if (isPlaying) "⏸ Пауза" else "▶ Играть", color = Color(0xFF00FFFF), fontSize = 12.sp) }
-                Spacer(modifier = Modifier.width(8.dp))
-                listOf(0.5f, 1.0f, 1.5f, 2.0f).forEach { speed ->
-                    TextButton(onClick = { playbackSpeed = speed; mediaPlayerInstance?.let { mp -> try { val params = mp.playbackParams; params.speed = speed; mp.playbackParams = params } catch (e: Exception) {} } }, colors = ButtonDefaults.textButtonColors(contentColor = if (playbackSpeed == speed) Color(0xFF00FFFF) else Color.Gray)) { Text("${speed}x", fontSize = 12.sp) }
-                }
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(formatTime(videoPosition), color = Color.Gray, fontSize = 12.sp)
-                Slider(value = videoPosition.toFloat(), onValueChange = { videoPosition = it.toInt(); videoViewInstance?.seekTo(it.toInt()) }, valueRange = 0f..(if (videoDuration > 0) videoDuration.toFloat() else 1f), modifier = Modifier.weight(1f).padding(horizontal = 8.dp))
-                Text(formatTime(videoDuration), color = Color.Gray, fontSize = 12.sp)
-            }
+
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Нач: ${formatTime(startTrim)}", color = Color(0xFF00FFFF), fontSize = 11.sp)
                 Slider(value = startTrim.toFloat(), onValueChange = { if (it < endTrim) { startTrim = it.toInt(); videoViewInstance?.seekTo(startTrim) } }, valueRange = 0f..(if (videoDuration > 0) videoDuration.toFloat() else 1f), modifier = Modifier.weight(1f).padding(horizontal = 8.dp))
