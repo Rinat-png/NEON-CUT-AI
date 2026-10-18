@@ -117,7 +117,7 @@ class CloudAiEngine : AiEngine {
                 })
 
                 val json = JSONObject().apply {
-                    put("model", "llama3-8b-8192") // Бесплатная и быстрая модель
+                    put("model", "openai/gpt-oss-20b") // Бесплатная и быстрая модель
                     put("messages", messagesArray)
                 }
 
