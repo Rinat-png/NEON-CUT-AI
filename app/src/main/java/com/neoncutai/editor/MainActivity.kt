@@ -358,6 +358,7 @@ fun ProjectScreen(projects: List<Project>, onProjectClick: (Project) -> Unit, on
 
 
 
+@Composable
 fun EditorScreen(initialProject: Project, onBackClick: (Project) -> Unit) {
     val context = LocalContext.current
     var project by remember { mutableStateOf(initialProject) }
@@ -378,15 +379,7 @@ fun EditorScreen(initialProject: Project, onBackClick: (Project) -> Unit) {
     
     var showAiDialog by remember { mutableStateOf(false) }
     var allowCloud by remember { mutableStateOf(false) }
-var allowWebSearch by remember { mutableStateOf(false) }
-var apiKey by remember { mutableStateOf(context.getSharedPreferences("neon_prefs", Context.MODE_PRIVATE).getString("gemini_key", "") ?: "") }
-var pendingProposal by remember(project.id) { mutableStateOf<AiProposal?>(null) }
-var aiMessages by remember(project.id) { mutableStateOf(loadChatHistory(context, project.id)) }
-var isAiLoading by remember(project.id) { mutableStateOf(false) }
-var activeAiJob by remember(project.id) { mutableStateOf<Job?>(null) }
-var currentRequestId by remember(project.id) { mutableStateOf<String?>(null) }
-var saveErrorMessage by remember(project.id) { mutableStateOf<String?>(null) }
-var recoveryFailed by remember(project.id) { mutableStateOf(false) }
+    var allowWebSearch by remember { mutableStateOf(false) }
     var apiKey by remember { mutableStateOf(context.getSharedPreferences("neon_prefs", Context.MODE_PRIVATE).getString("gemini_key", "") ?: "") }
     
     var pendingProposal by remember(project.id) { mutableStateOf<AiProposal?>(null) }
@@ -433,113 +426,126 @@ var recoveryFailed by remember(project.id) { mutableStateOf(false) }
             delay(300); isExporting = false
         }
     }
-
-    Column(modifier = Modifier.fillMaxSize().background(Color(0xFF090909
-    // ТАЙМ-ЛИНИЯ
-    Column(
-        modifier = Modifier.fillMaxWidth().height(80.dp).background(Color(0xFF121212)).padding(horizontal = 16.dp, vertical = 8.dp)
-    ) {
-        // Дорожка Видео
-        Row(modifier = Modifier.fillMaxWidth().height(28.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Видео", color = Color.Gray, fontSize = 9.sp, modifier = Modifier.width(40.dp))
-            Box(modifier = Modifier.fillMaxHeight().width(if (project.videoUri != null) 150.dp else 80.dp).background(Color(0xFF00FFFF).copy(alpha = 0.2f), RoundedCornerShape(4.dp)).border(1.dp, Color(0xFF00FFFF), RoundedCornerShape(4.dp)), contentAlignment = Alignment.Center) {
-                if (project.videoUri != null) Text(formatTime(endTrim - startTrim), color = Color.White, fontSize = 10.sp) else Text("Пусто", color = Color.DarkGray, fontSize = 10.sp)
-            }
-        }
-        Spacer(modifier = Modifier.height(4.dp))
-        // Дорожка Аудио
-        Row(modifier = Modifier.fillMaxWidth().height(28.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Аудио", color = Color.Gray, fontSize = 9.sp, modifier = Modifier.width(40.dp))
-            Box(modifier = Modifier.fillMaxHeight().width(if (project.audioUri != null) 180.dp else 80.dp).background(Color(0xFFFF00FF).copy(alpha = 0.2f), RoundedCornerShape(4.dp)).border(1.dp, Color(0xFFFF00FF), RoundedCornerShape(4.dp)), contentAlignment = Alignment.Center) {
-                if (project.audioUri != null) Text("Музыка", color = Color.White, fontSize = 10.sp) else Text("Нет", color = Color.DarkGray, fontSize = 10.sp)
-            }
-        }
-    }
-
-    // НИЖНЯЯ ПАНЕЛЬ ИНСТРУМЕНТОВ (CapCut style)
+Column(modifier = Modifier.fillMaxSize().background(Color(0xFF090909))) {
     Row(
-        modifier = Modifier.fillMaxWidth().background(Color(0xFF090909)).padding(vertical = 12.dp, horizontal = 16.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        // Видео
-        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { videoPicker.launch("video/*") }) {
-            Box(modifier = Modifier.size(44.dp).background(Color(0xFF1A1A1A), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
-                Text("📹", fontSize = 20.sp)
-            }
-            Text("Видео", color = Color.White, fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
+        TextButton(onClick = { onBackClick(project.copy(startTrim = startTrim, endTrim = endTrim)) }) {
+            Text("< Назад", color = Color(0xFF00FFFF), fontSize = 16.sp, fontWeight = FontWeight.Bold)
         }
-        // Музыка
-        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { audioPicker.launch("audio/*") }) {
-            Box(modifier = Modifier.size(44.dp).background(Color(0xFF1A1A1A), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
-                Text("🎵", fontSize = 20.sp)
-            }
-            Text("Музыка", color = Color.White, fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
-        }
-        // Текст
-        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { showTextDialog = true }) {
-            Box(modifier = Modifier.size(44.dp).background(Color(0xFF1A1A1A), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
-                Text("T", color = Color(0xFF00FFFF), fontSize = 20.sp, fontWeight = FontWeight.Bold)
-            }
-            Text("Текст", color = Color.White, fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
-        }
-        // ИИ
-        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { showAiDialog = true }) {
-            Box(modifier = Modifier.size(44.dp).background(Color(0xFF1A1A1A), RoundedCornerShape(12.dp)).border(1.dp, Color(0xFFFF00FF), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
-                Text("✨", fontSize = 20.sp)
-            }
-            Text("ИИ", color = Color.White, fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
+        Button(
+            onClick = { isExporting = true },
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FF00)),
+            shape = RoundedCornerShape(20.dp),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+            modifier = Modifier.height(36.dp)
+        ) {
+            Text("Экспорт", color = Color.Black, fontSize = 14.sp, fontWeight = FontWeight.Bold)
         }
     }
-}
 
+    Box(
+        modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = 16.dp).background(Color.Black, RoundedCornerShape(12.dp)).border(1.dp, Color(0xFF1A1A1A), RoundedCornerShape(12.dp)),
+        contentAlignment = Alignment.Center
+    ) {
+        if (project.videoUri == null) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("🎬", fontSize = 48.sp, modifier = Modifier.padding(bottom = 8.dp))
+                Text("Нажмите 'Видео' чтобы начать", color = Color.Gray, textAlign = TextAlign.Center, fontSize = 14.sp)
+            }
+        } else {
+            AndroidView(factory = { ctx ->
+                VideoView(ctx).apply {
+                    setVideoURI(Uri.parse(project.videoUri))
+                    setOnPreparedListener { mp ->
+                        videoDuration = mp.duration
+                        if (endTrim == 0) endTrim = mp.duration
+                        videoViewInstance = this
+                        mediaPlayerInstance = mp
+                        seekTo(startTrim)
+                        try { val params = mp.playbackParams; params.speed = playbackSpeed; mp.playbackParams = params } catch (e: Exception) {}
+                        start()
+                        isPlaying = true
+                    }
+                    setOnCompletionListener { isPlaying = false }
+                    start()
+                }
+            }, modifier = Modifier.fillMaxSize())
+            
+            project.texts.forEach { text -> 
+                Text(text = text, color = Color(0xFF00FFFF), fontSize = 28.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 50.dp)) 
+            }
+        }
+    }
+
+    if (project.videoUri != null) {
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).background(Color(0xFF121212), RoundedCornerShape(12.dp)).padding(12.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                Button(onClick = { videoViewInstance?.let { if (it.isPlaying) { it.pause(); isPlaying = false } else { it.start(); isPlaying = true } } }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A1A1A)), modifier = Modifier.border(1.dp, Color(0xFF00FFFF), RoundedCornerShape(8.dp)).height(36.dp)) {
+                    Text(if (isPlaying) "⏸ Пауза" else "▶ Играть", color = Color(0xFF00FFFF), fontSize = 12.sp)
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf(0.5f, 1.0f, 1.5f, 2.0f).forEach { speed ->
+                        TextButton(onClick = { playbackSpeed = speed; mediaPlayerInstance?.let { mp -> try { val params = mp.playbackParams; params.speed = speed; mp.playbackParams = params } catch (e: Exception) {} } }, colors = ButtonDefaults.textButtonColors(contentColor = if (playbackSpeed == speed) Color.Black else Color.Gray, containerColor = if (playbackSpeed == speed) Color(0xFF00FFFF) else Color.Transparent), modifier = Modifier.size(32.dp), shape = RoundedCornerShape(8.dp)) { Text("${speed}x", fontSize = 10.sp, fontWeight = FontWeight.Bold) }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Нач: ${formatTime(startTrim)}", color = Color(0xFF00FFFF), fontSize = 11.sp)
-                Slider(value = startTrim.toFloat(), onValueChange = { if (it < endTrim) { startTrim = it.toInt(); videoViewInstance?.seekTo(startTrim) } }, valueRange = 0f..(if (videoDuration > 0) videoDuration.toFloat() else 1f), modifier = Modifier.weight(1f).padding(horizontal = 8.dp))
+                Text(formatTime(videoPosition), color = Color.Gray, fontSize = 11.sp, modifier = Modifier.width(36.dp))
+                Slider(value = videoPosition.toFloat(), onValueChange = { videoPosition = it.toInt(); videoViewInstance?.seekTo(it.toInt()) }, valueRange = 0f..(if (videoDuration > 0) videoDuration.toFloat() else 1f), modifier = Modifier.weight(1f).padding(horizontal = 8.dp), colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = Color.Gray))
+                Text(formatTime(videoDuration), color = Color.Gray, fontSize = 11.sp, modifier = Modifier.width(36.dp))
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Кон: ${formatTime(endTrim)}", color = Color(0xFFFF00FF), fontSize = 11.sp)
-                Slider(value = endTrim.toFloat(), onValueChange = { if (it > startTrim) { endTrim = it.toInt() } }, valueRange = 0f..(if (videoDuration > 0) videoDuration.toFloat() else 1f), modifier = Modifier.weight(1f).padding(horizontal = 8.dp))
+                Text("Нач", color = Color(0xFF00FFFF), fontSize = 11.sp, modifier = Modifier.width(30.dp))
+                Slider(value = startTrim.toFloat(), onValueChange = { if (it < endTrim) { startTrim = it.toInt(); videoViewInstance?.seekTo(startTrim) } }, valueRange = 0f..(if (videoDuration > 0) videoDuration.toFloat() else 1f), modifier = Modifier.weight(1f), colors = SliderDefaults.colors(thumbColor = Color(0xFF00FFFF), activeTrackColor = Color(0xFF00FFFF).copy(alpha = 0.5f)))
+                Text(formatTime(startTrim), color = Color.White, fontSize = 11.sp, modifier = Modifier.width(40.dp), textAlign = TextAlign.End)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Кон", color = Color(0xFFFF00FF), fontSize = 11.sp, modifier = Modifier.width(30.dp))
+                Slider(value = endTrim.toFloat(), onValueChange = { if (it > startTrim) { endTrim = it.toInt() } }, valueRange = 0f..(if (videoDuration > 0) videoDuration.toFloat() else 1f), modifier = Modifier.weight(1f), colors = SliderDefaults.colors(thumbColor = Color(0xFFFF00FF), activeTrackColor = Color(0xFFFF00FF).copy(alpha = 0.5f)))
+                Text(formatTime(endTrim), color = Color.White, fontSize = 11.sp, modifier = Modifier.width(40.dp), textAlign = TextAlign.End)
             }
         }
     }
+        Column(modifier = Modifier.fillMaxWidth().height(80.dp).background(Color(0xFF121212)).padding(horizontal = 16.dp, vertical = 8.dp)) {
+            Row(modifier = Modifier.fillMaxWidth().height(28.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Видео", color = Color.Gray, fontSize = 9.sp, modifier = Modifier.width(40.dp))
+                Box(modifier = Modifier.fillMaxHeight().width(if (project.videoUri != null) 150.dp else 80.dp).background(Color(0xFF00FFFF).copy(alpha = 0.2f), RoundedCornerShape(4.dp)).border(1.dp, Color(0xFF00FFFF), RoundedCornerShape(4.dp)), contentAlignment = Alignment.Center) {
+                    if (project.videoUri != null) Text(formatTime(endTrim - startTrim), color = Color.White, fontSize = 10.sp) else Text("Пусто", color = Color.DarkGray, fontSize = 10.sp)
+                }
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(modifier = Modifier.fillMaxWidth().height(28.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Аудио", color = Color.Gray, fontSize = 9.sp, modifier = Modifier.width(40.dp))
+                Box(modifier = Modifier.fillMaxHeight().width(if (project.audioUri != null) 180.dp else 80.dp).background(Color(0xFFFF00FF).copy(alpha = 0.2f), RoundedCornerShape(4.dp)).border(1.dp, Color(0xFFFF00FF), RoundedCornerShape(4.dp)), contentAlignment = Alignment.Center) {
+                    if (project.audioUri != null) Text("Музыка", color = Color.White, fontSize = 10.sp) else Text("Нет", color = Color.DarkGray, fontSize = 10.sp)
+                }
+            }
+        }
 
-    // НИЖНЯЯ ПАНЕЛЬ ИНСТРУМЕНТОВ (как в CapCut)
-    Row(modifier = Modifier.fillMaxWidth().padding(8.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Button(onClick = { videoPicker.launch("video/*") }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FFFF)), contentPadding = PaddingValues(0.dp), modifier = Modifier.size(48.dp), shape = RoundedCornerShape(12.dp)) { Text("V", color = Color.Black, fontWeight = FontWeight.Bold) }
-            Text("Видео", color = Color.White, fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
+        Row(modifier = Modifier.fillMaxWidth().background(Color(0xFF090909)).padding(vertical = 12.dp, horizontal = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { videoPicker.launch("video/*") }) {
+                Box(modifier = Modifier.size(44.dp).background(Color(0xFF1A1A1A), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) { Text("📹", fontSize = 20.sp) }
+                Text("Видео", color = Color.White, fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { audioPicker.launch("audio/*") }) {
+                Box(modifier = Modifier.size(44.dp).background(Color(0xFF1A1A1A), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) { Text("🎵", fontSize = 20.sp) }
+                Text("Музыка", color = Color.White, fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { showTextDialog = true }) {
+                Box(modifier = Modifier.size(44.dp).background(Color(0xFF1A1A1A), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) { Text("T", color = Color(0xFF00FFFF), fontSize = 20.sp, fontWeight = FontWeight.Bold) }
+                Text("Текст", color = Color.White, fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { showAiDialog = true }) {
+                Box(modifier = Modifier.size(44.dp).background(Color(0xFF1A1A1A), RoundedCornerShape(12.dp)).border(1.dp, Color(0xFFFF00FF), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) { Text("✨", fontSize = 20.sp) }
+                Text("ИИ", color = Color.White, fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
+            }
         }
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Button(onClick = { audioPicker.launch("audio/*") }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF00FF)), contentPadding = PaddingValues(0.dp), modifier = Modifier.size(48.dp), shape = RoundedCornerShape(12.dp)) { Text("M", color = Color.White, fontWeight = FontWeight.Bold) }
-            Text("Музыка", color = Color.White, fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
-        }
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Button(onClick = { showTextDialog = true }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A1A1A)), contentPadding = PaddingValues(0.dp), modifier = Modifier.size(48.dp).border(1.dp, Color(0xFF00FFFF), RoundedCornerShape(12.dp)), shape = RoundedCornerShape(12.dp)) { Text("T", color = Color(0xFF00FFFF), fontWeight = FontWeight.Bold) }
-            Text("Текст", color = Color.White, fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
-        }
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Button(onClick = { showAiDialog = true }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A1A1A)), contentPadding = PaddingValues(0.dp), modifier = Modifier.size(48.dp).border(1.dp, Color(0xFFFF00FF), RoundedCornerShape(12.dp)), shape = RoundedCornerShape(12.dp)) { Text("ИИ", color = Color(0xFFFF00FF), fontWeight = FontWeight.Bold) }
-            Text("ИИ", color = Color.White, fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
-        }
-    }
+    } // КОНЕЦ ОСНОВНОГО COLUMN
 
-    Column(modifier = Modifier.fillMaxWidth().height(80.dp).background(Color(0xFF121212)).padding(8.dp)) {
-        Row(modifier = Modifier.fillMaxWidth().height(30.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("V", color = Color.Gray, fontSize = 10.sp, modifier = Modifier.width(20.dp))
-            Box(modifier = Modifier.fillMaxHeight().width(180.dp).background(Color(0xFF00FFFF).copy(alpha = 0.2f), RoundedCornerShape(4.dp)).border(1.dp, Color(0xFF00FFFF), RoundedCornerShape(4.dp)), contentAlignment = Alignment.Center) {
-                if (project.videoUri != null) Text("Видео: ${formatTime(endTrim - startTrim)}", color = Color.White, fontSize = 10.sp) else Text("Пусто", color = Color.DarkGray, fontSize = 10.sp)
-            }
-        }
-        Spacer(modifier = Modifier.height(4.dp))
-        Row(modifier = Modifier.fillMaxWidth().height(30.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("A", color = Color.Gray, fontSize = 10.sp, modifier = Modifier.width(20.dp))
-            Box(modifier = Modifier.fillMaxHeight().width(220.dp).background(Color(0xFFFF00FF).copy(alpha = 0.2f), RoundedCornerShape(4.dp)).border(1.dp, Color(0xFFFF00FF), RoundedCornerShape(4.dp)), contentAlignment = Alignment.Center) {
-                if (project.audioUri != null) Text("Аудио трек", color = Color.White, fontSize = 10.sp) else Text("Нет музыки", color = Color.DarkGray, fontSize = 10.sp)
-            }
-        }
-    }
-}
     if (showTextDialog) {
         AlertDialog(onDismissRequest = { showTextDialog = false }, title = { Text("Добавить текст", color = Color.White) }, text = { OutlinedTextField(value = newText, onValueChange = { newText = it }, label = { Text("Текст") }, singleLine = true) }, confirmButton = { TextButton(onClick = { if (newText.isNotBlank()) { project = project.copy(texts = project.texts + newText); newText = ""; showTextDialog = false } }) { Text("Добавить", color = Color(0xFF00FFFF)) } }, dismissButton = { TextButton(onClick = { showTextDialog = false }) { Text("Отмена", color = Color.Gray) } })
     }
@@ -552,10 +558,7 @@ var recoveryFailed by remember(project.id) { mutableStateOf(false) }
         AiAssistantDialog(
             onDismiss = { showAiDialog = false }, aiMessages = aiMessages, isAiLoading = isAiLoading,
             allowCloud = allowCloud, onCloudChange = { allowCloud = it },
-            apiKey = apiKey, onApiKeyChange = { newKey -> 
-                apiKey = newKey
-                context.getSharedPreferences("neon_prefs", Context.MODE_PRIVATE).edit().putString("gemini_key", newKey).apply()
-            },
+            apiKey = apiKey, onApiKeyChange = { newKey -> apiKey = newKey; context.getSharedPreferences("neon_prefs", Context.MODE_PRIVATE).edit().putString("gemini_key", newKey).apply() },
             onSendMessage = { text ->
                 if (text.isNotBlank() && !isAiLoading) {
                     val requestProjectId = project.id; val requestProposalId = pendingProposal?.id; val thisRequestId = UUID.randomUUID().toString()
@@ -568,23 +571,20 @@ var recoveryFailed by remember(project.id) { mutableStateOf(false) }
                             var aiResponse: AiResponse; var systemMessage: String? = null
                             val journalCheck = if (requestProposalId != null) checkJournal(context, requestProjectId, requestProposalId) else JournalCheckResult.NotFound
 
-                            if (recoveryFailed) { aiResponse = AiResponse("Действия ИИ заблокированы."); saveErrorMessage = "Устраните ошибку восстановления."
-                            } else if ((isYes || isNo) && journalCheck is JournalCheckResult.Corrupted) { saveErrorMessage = "Журнал поврежден."; aiResponse = AiResponse("Заблокировано.")
-                            } else if ((isYes || isNo) && journalCheck is JournalCheckResult.Error) { saveErrorMessage = "Ошибка журнала."; aiResponse = AiResponse("Заблокировано.")
-                            } else if ((isYes || isNo) && journalCheck is JournalCheckResult.Found) {
+                            if (recoveryFailed) { aiResponse = AiResponse("Действия ИИ заблокированы."); saveErrorMessage = "Устраните ошибку восстановления." }
+                            else if ((isYes || isNo) && journalCheck is JournalCheckResult.Corrupted) { saveErrorMessage = "Журнал поврежден."; aiResponse = AiResponse("Заблокировано.") }
+                            else if ((isYes || isNo) && journalCheck is JournalCheckResult.Error) { saveErrorMessage = "Ошибка журнала."; aiResponse = AiResponse("Заблокировано.") }
+                            else if ((isYes || isNo) && journalCheck is JournalCheckResult.Found) {
                                 val cleared = saveProposal(context, requestProjectId, null)
-                                if (cleared) { pendingProposal = null; systemMessage = "[Система]: Уже выполнено."; aiResponse = AiResponse("Уже выполнено.")
-                                } else { saveErrorMessage = "Ошибка очистки."; aiResponse = AiResponse("Ошибка.") }
+                                if (cleared) { pendingProposal = null; systemMessage = "[Система]: Уже выполнено."; aiResponse = AiResponse("Уже выполнено.") }
+                                else { saveErrorMessage = "Ошибка очистки."; aiResponse = AiResponse("Ошибка.") }
                             } else if (isYes && currentProposal != null) {
                                 if (project.id == requestProjectId && currentRequestId == thisRequestId) {
                                     val saveRes = saveCompletedProposal(context, requestProjectId, CompletedProposal(currentProposal.copy(status = ActionStatus.CONFIRMED).id, currentProposal.actionType, ActionStatus.CONFIRMED))
                                     if (saveRes is SaveResult.Success || saveRes is SaveResult.AlreadyCompleted) {
                                         val cleared = saveProposal(context, requestProjectId, null)
-                                        if (cleared) { pendingProposal = null; systemMessage = "[Система]: Подтверждено."; aiResponse = AiResponse("ОК.")
-                                        } else {
-                                            if (setNeedsRecovery(context, requestProjectId, true)) { pendingProposal = null; saveErrorMessage = "Требуется восстановление."; systemMessage = "[Система]: ОК (ошибка синхронизации)."; aiResponse = AiResponse("ОК.")
-                                            } else { saveErrorMessage = "Критическая ошибка."; aiResponse = AiResponse("Сбой.") }
-                                        }
+                                        if (cleared) { pendingProposal = null; systemMessage = "[Система]: Подтверждено."; aiResponse = AiResponse("ОК.") }
+                                        else { if (setNeedsRecovery(context, requestProjectId, true)) { pendingProposal = null; saveErrorMessage = "Требуется восстановление."; systemMessage = "[Система]: ОК (ошибка синхронизации)."; aiResponse = AiResponse("ОК.") } else { saveErrorMessage = "Критическая ошибка."; aiResponse = AiResponse("Сбой.") } }
                                     } else { saveErrorMessage = "Ошибка записи."; aiResponse = AiResponse("Сбой.") }
                                 } else { aiResponse = AiResponse("Устарел.") }
                             } else if (isNo && currentProposal != null) {
@@ -592,15 +592,12 @@ var recoveryFailed by remember(project.id) { mutableStateOf(false) }
                                     val saveRes = saveCompletedProposal(context, requestProjectId, CompletedProposal(currentProposal.copy(status = ActionStatus.CANCELLED).id, currentProposal.actionType, ActionStatus.CANCELLED))
                                     if (saveRes is SaveResult.Success || saveRes is SaveResult.AlreadyCompleted) {
                                         val cleared = saveProposal(context, requestProjectId, null)
-                                        if (cleared) { pendingProposal = null; systemMessage = "[Система]: Отменено."; aiResponse = AiResponse("ОК.")
-                                        } else {
-                                            if (setNeedsRecovery(context, requestProjectId, true)) { pendingProposal = null; saveErrorMessage = "Требуется восстановление."; systemMessage = "[Система]: ОК (ошибка)."; aiResponse = AiResponse("ОК.")
-                                            } else { saveErrorMessage = "Критическая ошибка."; aiResponse = AiResponse("Сбой.") }
-                                        }
+                                        if (cleared) { pendingProposal = null; systemMessage = "[Система]: Отменено."; aiResponse = AiResponse("ОК.") }
+                                        else { if (setNeedsRecovery(context, requestProjectId, true)) { pendingProposal = null; saveErrorMessage = "Требуется восстановление."; systemMessage = "[Система]: ОК (ошибка)."; aiResponse = AiResponse("ОК.") } else { saveErrorMessage = "Критическая ошибка."; aiResponse = AiResponse("Сбой.") } }
                                     } else { saveErrorMessage = "Ошибка записи."; aiResponse = AiResponse("Сбой.") }
                                 } else { aiResponse = AiResponse("Устарел.") }
-                            } else if (currentProposal != null && !isYes && !isNo) { aiResponse = AiResponse("Сначала подтвердите ('да') или отмените ('нет').")
-                            } else { aiResponse = aiManager.getResponse(text, updatedMessages, allowCloud, apiKey) }
+                            } else if (currentProposal != null && !isYes && !isNo) { aiResponse = AiResponse("Сначала подтвердите ('да') или отмените ('нет').") }
+                            else { aiResponse = aiManager.getResponse(text, updatedMessages, allowCloud, apiKey) }
 
                             if (project.id == requestProjectId && currentRequestId == thisRequestId) {
                                 if (systemMessage != null) updatedMessages = updatedMessages + ChatMessage(systemMessage, false)
@@ -617,9 +614,7 @@ var recoveryFailed by remember(project.id) { mutableStateOf(false) }
                             }
                         } catch (e: CancellationException) { throw e
                         } catch (e: Exception) {
-                            if (project.id == requestProjectId && currentRequestId == thisRequestId) {
-                                updatedMessages = updatedMessages + ChatMessage("[Ошибка]: ${e.message ?: "Неизвестно"}", false); aiMessages = updatedMessages
-                            }
+                            if (project.id == requestProjectId && currentRequestId == thisRequestId) { updatedMessages = updatedMessages + ChatMessage("[Ошибка]: ${e.message ?: "Неизвестно"}", false); aiMessages = updatedMessages }
                         } finally {
                             if (project.id == requestProjectId && currentRequestId == thisRequestId) { isAiLoading = false; currentRequestId = null; activeAiJob = null }
                         }
@@ -629,7 +624,6 @@ var recoveryFailed by remember(project.id) { mutableStateOf(false) }
         )
     }
 }
-
 @Composable
 fun AiAssistantDialog(
     onDismiss: () -> Unit, aiMessages: List<ChatMessage>, isAiLoading: Boolean,
