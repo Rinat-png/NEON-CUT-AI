@@ -22,6 +22,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -29,7 +30,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.layout.statusBarsPadding
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -45,19 +45,25 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-
 data class Project(
     val id: String, val name: String, val videoUri: String? = null,
     val audioUri: String? = null, val texts: List<String> = emptyList(),
     val startTrim: Int = 0, val endTrim: Int = 0,
-    val effect: String? = null // <--- НОВОЕ ПОЛЕ ДЛЯ ЭФФЕКТОВ
+    val effect: String? = null
 )
+
 data class ChatMessage(val text: String, val isUser: Boolean)
 
-enum class ActionType { NONE, ADD_SUBTITLES, REMOVE_SILENCE, TRIM_VIDEO, ADD_TEXT, ADD_EFFECT }
+enum class ActionType { NONE, ADD_SUBTITLES, REMOVE_SILENCE, TRIM_VIDEO, ADD_TEXT, ADD_EFFECT, CHANGE_SPEED }
 enum class ActionStatus { PENDING, CONFIRMED, CANCELLED, EXECUTED, ERROR }
 
-data class AiProposal(val id: String = UUID.randomUUID().toString(), val actionType: ActionType, val explanation: String, val status: ActionStatus = ActionStatus.PENDING, val params: Map<String, String> = emptyMap())
+data class AiProposal(
+    val id: String = UUID.randomUUID().toString(), 
+    val actionType: ActionType, 
+    val explanation: String, 
+    val status: ActionStatus = ActionStatus.PENDING, 
+    val params: Map<String, String> = emptyMap()
+)
 data class AiResponse(val text: String, val proposal: AiProposal? = null, val errorMessage: String? = null)
 data class CompletedProposal(val id: String, val actionType: ActionType, val status: ActionStatus, val timestamp: Long = System.currentTimeMillis())
 
@@ -71,21 +77,23 @@ class LocalAiEngine : AiEngine {
     override suspend fun generateResponse(prompt: String, history: List<ChatMessage>, apiKey: String): AiResponse {
         val lower = prompt.lowercase()
         return when {
-            lower.contains("эффект") || lower.contains("свечен") || lower.contains("неон") -> {
-                val p = AiProposal(actionType = ActionType.ADD_EFFECT, explanation = "Демо: добавить неоновый эффект.", params = mapOf("effectName" to "Neon Glow"))
-                AiResponse("Я могу добавить неоновое свечение. Подтвердить?", p)
-            }
-            lower.contains("обрежь") || lower.contains("оставь") -> {
+            lower.contains("неон") || lower.contains("свечен") -> 
+                AiResponse("Включаю неоновый фильтр! Подтвердить?", AiProposal(actionType = ActionType.ADD_EFFECT, explanation = "Эффект: Неон", params = mapOf("effectName" to "Neon")))
+            lower.contains("чб") || lower.contains("черно-бел") -> 
+                AiResponse("Накладываю черно-белый фильтр. Подтвердить?", AiProposal(actionType = ActionType.ADD_EFFECT, explanation = "Эффект: ЧБ", params = mapOf("effectName" to "B&W")))
+            lower.contains("ускор") -> 
+                AiResponse("Ускоряю видео в 2 раза. Подтвердить?", AiProposal(actionType = ActionType.CHANGE_SPEED, explanation = "Скорость: 2x", params = mapOf("speedValue" to "2.0")))
+            lower.contains("замедл") || lower.contains("слоу") -> 
+                AiResponse("Замедляю видео (слоу-мо). Подтвердить?", AiProposal(actionType = ActionType.CHANGE_SPEED, explanation = "Скорость: 0.5x", params = mapOf("speedValue" to "0.5")))
+            lower.contains("обрежь") -> {
                 val num = Regex("\\d+").find(prompt)?.value?.toIntOrNull() ?: 5
-                val p = AiProposal(actionType = ActionType.TRIM_VIDEO, explanation = "Демо: обрезать видео до $num секунд.", params = mapOf("endSeconds" to num.toString()))
-                AiResponse("Я могу обрезать видео до $num секунд. Подтвердить?", p)
+                AiResponse("Обрезаю видео до $num секунд. Подтвердить?", AiProposal(actionType = ActionType.TRIM_VIDEO, explanation = "Обрезка", params = mapOf("endSeconds" to num.toString())))
             }
             lower.contains("текст") || lower.contains("надпись") -> {
                 val txt = prompt.split(" ").lastOrNull() ?: "NEON"
-                val p = AiProposal(actionType = ActionType.ADD_TEXT, explanation = "Демо: добавить текст '$txt'.", params = mapOf("textContent" to txt))
-                AiResponse("Я могу добавить текст '$txt'. Подтвердить?", p)
+                AiResponse("Добавляю текст '$txt' на видео. Подтвердить?", AiProposal(actionType = ActionType.ADD_TEXT, explanation = "Текст", params = mapOf("textContent" to txt)))
             }
-            else -> AiResponse("Локальный ИИ. Попроси меня: 'обрежь до 5 секунд', 'добавь текст Привет' или 'добавь неоновый эффект'.")
+            else -> AiResponse("Я твой локальный ИИ. Попроси меня: 'добавь неон', 'сделай ЧБ', 'ускорь видео', 'обрежь до 5 сек' или 'добавь текст Привет'.")
         }
     }
 }
@@ -97,12 +105,19 @@ class CloudAiEngine : AiEngine {
             try {
                 val client = OkHttpClient()
                 val messages = JSONArray()
-                messages.put(JSONObject().put("role", "system").put("content", "Ты — ИИ в NEON CUT AI. Если просят эффект, верни JSON: {\"action\": \"ADD_EFFECT\", \"effect\": \"Neon\"}. Если обрезать: {\"action\": \"TRIM_VIDEO\", \"seconds\": 5}. Если текст: {\"action\": \"ADD_TEXT\", \"text\": \"Привет\"}. В остальном отвечай текстом."))
+                val colors = "#FF0000, #00FF00, #0000FF, #FFFF00, #FF00FF, #00FFFF, #FFA500, #800080, #008000, #FFC0CB, #A52A2A, #808080, #000000, #FFFFFF, #4B0082, #FF4500, #2E8B57, #DAA520, #8A2BE2, #DC143C, #40E0D0, #EE82EE, #F5DEB3, #98FB98"
+                
+                messages.put(JSONObject().put("role", "system").put("content", 
+                    "Ты — ИИ-режиссер в NEON CUT AI. Если просят 'автомонтаж' или изменить видео, верни СТРОГО JSON-массив действий. " +
+                    "Действия: ADD_EFFECT (цвет из списка: $colors, или 'Neon', 'B&W'), ADD_TEXT, CHANGE_SPEED (0.5, 2.0, 10.0), TRIM_VIDEO. " +
+                    "Пример: [{\"action\": \"ADD_EFFECT\", \"effect\": \"#FF00FF\"}, {\"action\": \"ADD_TEXT\", \"text\": \"EPIC\"}, {\"action\": \"CHANGE_SPEED\", \"speed\": 2.0}]. " +
+                    "Если просто болтают, отвечай текстом."
+                ))
                 
                 history.takeLast(10).forEach { msg -> messages.put(JSONObject().put("role", if (msg.isUser) "user" else "assistant").put("content", msg.text)) }
                 messages.put(JSONObject().put("role", "user").put("content", prompt))
 
-                val json = JSONObject().put("model", "openai/gpt-oss-20b").put("messages", messages)
+                val json = JSONObject().put("model", "llama-3.3-70b-versatile").put("messages", messages)
                 val request = Request.Builder().url("https://api.groq.com/openai/v1/chat/completions").addHeader("Authorization", "Bearer $apiKey").post(json.toString().toRequestBody("application/json".toMediaType())).build()
                 
                 val response = client.newCall(request).execute()
@@ -110,22 +125,22 @@ class CloudAiEngine : AiEngine {
 
                 val rawText = JSONObject(response.body?.string() ?: "").getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content").trim().replace("```json", "").replace("```", "").trim()
                 
-                if (rawText.startsWith("{")) {
-                    val cmd = JSONObject(rawText)
-                    when (cmd.optString("action")) {
-                        "ADD_EFFECT" -> {
-                            val eff = cmd.optString("effect", "Neon")
-                            return@withContext AiResponse("Я добавлю неоновый эффект. Подтвердить?", AiProposal(actionType = ActionType.ADD_EFFECT, explanation = "Облачный ИИ: добавить эффект", params = mapOf("effectName" to eff)))
-                        }
-                        "TRIM_VIDEO" -> {
-                            val s = cmd.optInt("seconds", 5)
-                            return@withContext AiResponse("Я обрежу видео до $s секунд. Подтвердить?", AiProposal(actionType = ActionType.TRIM_VIDEO, explanation = "Облачный ИИ: обрезать", params = mapOf("endSeconds" to s.toString())))
-                        }
-                        "ADD_TEXT" -> {
-                            val t = cmd.optString("text", "NEON")
-                            return@withContext AiResponse("Добавлю текст '$t'. Подтвердить?", AiProposal(actionType = ActionType.ADD_TEXT, explanation = "Облачный ИИ: текст", params = mapOf("textContent" to t)))
+                if (rawText.startsWith("[")) {
+                    val actionsArray = JSONArray(rawText)
+                    val proposals = mutableListOf<String>()
+                    for (i in 0 until actionsArray.length()) {
+                        val cmd = actionsArray.getJSONObject(i)
+                        when (cmd.optString("action")) {
+                            "ADD_EFFECT" -> proposals.add("Наложить эффект ${cmd.optString("effect", "Neon")}")
+                            "ADD_TEXT" -> proposals.add("Добавить текст '${cmd.optString("text", "NEON")}'")
+                            "CHANGE_SPEED" -> proposals.add("Скорость ${cmd.optDouble("speed", 2.0)}x")
+                            "TRIM_VIDEO" -> proposals.add("Обрезать до ${cmd.optInt("seconds", 5)} сек")
                         }
                     }
+                    return@withContext AiResponse(
+                        text = "🎬 Я подготовил план автомонтажа:\n- ${proposals.joinToString("\n- ")}\n\nПрименить всё это?",
+                        proposal = AiProposal(actionType = ActionType.NONE, explanation = "Автомонтаж", params = mapOf("jsonArray" to rawText))
+                    )
                 }
                 AiResponse(text = rawText)
             } catch (e: Exception) { AiResponse(text = "Ошибка подключения.", errorMessage = e.message) }
@@ -133,13 +148,52 @@ class CloudAiEngine : AiEngine {
     }
 }
 
-
-
 class AiManager(private val local: AiEngine, private val cloud: AiEngine) {
     suspend fun getResponse(prompt: String, history: List<ChatMessage>, allowCloud: Boolean, apiKey: String): AiResponse {
         return if (allowCloud) cloud.generateResponse(prompt, history, apiKey) else local.generateResponse(prompt, history, apiKey)
     }
 }
+fun saveChatHistory(context: Context, projectId: String, messages: List<ChatMessage>): Boolean {
+    return try {
+        val arr = JSONArray(); for (msg in messages) arr.put(JSONObject().put("text", msg.text).put("isUser", msg.isUser))
+        context.getSharedPreferences("neon_cut_chat_$projectId", Context.MODE_PRIVATE).edit().putString("history", arr.toString()).apply()
+        true
+    } catch (e: Exception) { false }
+}
+
+fun loadChatHistory(context: Context, projectId: String): List<ChatMessage> {
+    val list = mutableListOf<ChatMessage>()
+    try {
+        val arr = JSONArray(context.getSharedPreferences("neon_cut_chat_$projectId", Context.MODE_PRIVATE).getString("history", "[]") ?: "[]")
+        for (i in 0 until arr.length()) list.add(ChatMessage(arr.getJSONObject(i).getString("text"), arr.getJSONObject(i).getBoolean("isUser")))
+    } catch (e: Exception) { }
+    return list
+}
+
+fun saveProjects(context: Context, projects: List<Project>) {
+    val arr = JSONArray()
+    for (p in projects) {
+        val obj = JSONObject().put("id", p.id).put("name", p.name).put("videoUri", p.videoUri ?: "").put("audioUri", p.audioUri ?: "").put("startTrim", p.startTrim).put("endTrim", p.endTrim).put("effect", p.effect ?: "")
+        val tArr = JSONArray(); for (t in p.texts) tArr.put(t)
+        obj.put("texts", tArr); arr.put(obj)
+    }
+    context.getSharedPreferences("neon_cut_prefs", Context.MODE_PRIVATE).edit().putString("projects_data", arr.toString()).apply()
+}
+
+fun loadProjects(context: Context): List<Project> {
+    val list = mutableListOf<Project>()
+    try {
+        val arr = JSONArray(context.getSharedPreferences("neon_cut_prefs", Context.MODE_PRIVATE).getString("projects_data", "[]") ?: "[]")
+        for (i in 0 until arr.length()) {
+            val obj = arr.getJSONObject(i); val tArr = obj.optJSONArray("texts") ?: JSONArray()
+            val tList = mutableListOf<String>(); for (j in 0 until tArr.length()) tList.add(tArr.getString(j))
+            list.add(Project(obj.getString("id"), obj.getString("name"), obj.optString("videoUri").takeIf { it.isNotEmpty() }, obj.optString("audioUri").takeIf { it.isNotEmpty() }, tList, obj.optInt("startTrim", 0), obj.optInt("endTrim", 0), obj.optString("effect").takeIf { it.isNotEmpty() }))
+        }
+    } catch (e: Exception) { }
+    return list
+}
+
+fun formatTime(ms: Int): String = String.format("%02d:%02d", (ms / (1000 * 60)) % 60, (ms / 1000) % 60)
 val dbMutex = Mutex()
 
 fun internalCheckJournal(context: Context, projectId: String, proposalId: String): JournalCheckResult {
@@ -216,48 +270,6 @@ suspend fun recoverPendingProposal(context: Context, projectId: String): Recover
         }
     }
 }
-
-fun saveChatHistory(context: Context, projectId: String, messages: List<ChatMessage>): Boolean {
-    return try {
-        val arr = JSONArray(); for (msg in messages) arr.put(JSONObject().put("text", msg.text).put("isUser", msg.isUser))
-        context.getSharedPreferences("neon_cut_chat_$projectId", Context.MODE_PRIVATE).edit().putString("history", arr.toString()).apply()
-        true
-    } catch (e: Exception) { false }
-}
-
-fun loadChatHistory(context: Context, projectId: String): List<ChatMessage> {
-    val list = mutableListOf<ChatMessage>()
-    try {
-        val arr = JSONArray(context.getSharedPreferences("neon_cut_chat_$projectId", Context.MODE_PRIVATE).getString("history", "[]") ?: "[]")
-        for (i in 0 until arr.length()) list.add(ChatMessage(arr.getJSONObject(i).getString("text"), arr.getJSONObject(i).getBoolean("isUser")))
-    } catch (e: Exception) { }
-    return list
-}
-
-fun saveProjects(context: Context, projects: List<Project>) {
-    val arr = JSONArray()
-    for (p in projects) {
-        val obj = JSONObject().put("id", p.id).put("name", p.name).put("videoUri", p.videoUri ?: "").put("audioUri", p.audioUri ?: "").put("startTrim", p.startTrim).put("endTrim", p.endTrim).put("effect", p.effect ?: "")
-        val tArr = JSONArray(); for (t in p.texts) tArr.put(t)
-        obj.put("texts", tArr); arr.put(obj)
-    }
-    context.getSharedPreferences("neon_cut_prefs", Context.MODE_PRIVATE).edit().putString("projects_data", arr.toString()).apply()
-}
-
-fun loadProjects(context: Context): List<Project> {
-    val list = mutableListOf<Project>()
-    try {
-        val arr = JSONArray(context.getSharedPreferences("neon_cut_prefs", Context.MODE_PRIVATE).getString("projects_data", "[]") ?: "[]")
-        for (i in 0 until arr.length()) {
-            val obj = arr.getJSONObject(i); val tArr = obj.optJSONArray("texts") ?: JSONArray()
-            val tList = mutableListOf<String>(); for (j in 0 until tArr.length()) tList.add(tArr.getString(j))
-            list.add(Project(obj.getString("id"), obj.getString("name"), obj.optString("videoUri").takeIf { it.isNotEmpty() }, obj.optString("audioUri").takeIf { it.isNotEmpty() }, tList, obj.optInt("startTrim", 0), obj.optInt("endTrim", 0), obj.optString("effect").takeIf { it.isNotEmpty() }))
-        }
-    } catch (e: Exception) { }
-    return list
-}
-
-fun formatTime(ms: Int): String = String.format("%02d:%02d", (ms / (1000 * 60)) % 60, (ms / 1000) % 60)
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -330,6 +342,8 @@ fun EditorScreen(initialProject: Project, onBackClick: (Project) -> Unit) {
     var startTrim by rememberSaveable(project.id) { mutableStateOf(project.startTrim) }
     var endTrim by rememberSaveable(project.id) { mutableStateOf(project.endTrim) }
     var playbackSpeed by rememberSaveable(project.id) { mutableStateOf(1.0f) }
+    var isLooping by rememberSaveable(project.id) { mutableStateOf(false) }
+    var showSpeedDialog by remember { mutableStateOf(false) }
     
     var showTextDialog by remember { mutableStateOf(false) }
     var newText by remember { mutableStateOf("") }
@@ -367,10 +381,18 @@ fun EditorScreen(initialProject: Project, onBackClick: (Project) -> Unit) {
     val videoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? -> if (uri != null) { project = project.copy(videoUri = uri.toString()); videoViewInstance?.setVideoURI(uri); videoViewInstance?.start() } }
     val audioPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? -> if (uri != null) project = project.copy(audioUri = uri.toString()) }
 
-    LaunchedEffect(isPlaying, videoViewInstance, endTrim) {
+    LaunchedEffect(isPlaying, videoViewInstance, endTrim, isLooping) {
         while (isPlaying && videoViewInstance != null) {
             videoPosition = videoViewInstance!!.currentPosition
-            if (videoPosition >= endTrim && endTrim > 0) { videoViewInstance?.pause(); isPlaying = false; videoViewInstance?.seekTo(endTrim) }
+            if (videoPosition >= endTrim && endTrim > 0) {
+                if (isLooping) {
+                    videoViewInstance?.seekTo(startTrim)
+                } else {
+                    videoViewInstance?.pause()
+                    isPlaying = false
+                    videoViewInstance?.seekTo(endTrim)
+                }
+            }
             delay(50)
         }
     }
@@ -385,17 +407,11 @@ fun EditorScreen(initialProject: Project, onBackClick: (Project) -> Unit) {
             delay(300); isExporting = false
         }
     }
-// statusBarsPadding() решает проблему с "высокими" кнопками (отступает от челки/статус-бара)
 Column(modifier = Modifier.fillMaxSize().background(Color(0xFF090909)).statusBarsPadding()) {
-    
     Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-        TextButton(onClick = { onBackClick(project.copy(startTrim = startTrim, endTrim = endTrim)) }) { 
-            Text("< Назад", color = Color(0xFF00FFFF), fontSize = 16.sp, fontWeight = FontWeight.Bold) 
-        }
-        Spacer(modifier = Modifier.weight(1f)) // Отталкивает Экспорт вправо
-        Button(onClick = { isExporting = true }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FF00)), shape = RoundedCornerShape(20.dp), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp), modifier = Modifier.height(36.dp)) { 
-            Text("Экспорт", color = Color.Black, fontSize = 14.sp, fontWeight = FontWeight.Bold) 
-        }
+        TextButton(onClick = { onBackClick(project.copy(startTrim = startTrim, endTrim = endTrim)) }) { Text("< Назад", color = Color(0xFF00FFFF), fontSize = 16.sp, fontWeight = FontWeight.Bold) }
+        Spacer(modifier = Modifier.weight(1f))
+        Button(onClick = { isExporting = true }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FF00)), shape = RoundedCornerShape(20.dp), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp), modifier = Modifier.height(36.dp)) { Text("Экспорт", color = Color.Black, fontSize = 14.sp, fontWeight = FontWeight.Bold) }
     }
 
     Box(modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = 16.dp).background(Color.Black, RoundedCornerShape(12.dp)).border(1.dp, Color(0xFF1A1A1A), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
@@ -422,15 +438,18 @@ Column(modifier = Modifier.fillMaxSize().background(Color(0xFF090909)).statusBar
                     start()
                 }
             }, modifier = Modifier.fillMaxSize())
-            
-            // ОТОБРАЖЕНИЕ ЭФФЕКТА (Неоновое свечение)
+
             if (project.effect != null) {
-                Box(modifier = Modifier.fillMaxSize().border(4.dp, Color(0xFF00FFFF), RoundedCornerShape(12.dp))) // Рамка
-                Box(modifier = Modifier.fillMaxSize().background(Color(0xFF00FFFF).copy(alpha = 0.1f))) // Легкий оттенок
-                Text(text = "ЭФФЕКТ: ${project.effect}", color = Color(0xFF00FFFF), fontSize = 12.sp, modifier = Modifier.align(Alignment.BottomStart).padding(8.dp))
+                if (project.effect.startsWith("#")) {
+                    Box(modifier = Modifier.fillMaxSize().background(Color(android.graphics.Color.parseColor(project.effect)).copy(alpha = 0.4f)))
+                } else if (project.effect == "Neon") {
+                    Box(modifier = Modifier.fillMaxSize().border(3.dp, Color(0xFF00FFFF)).background(Color(0xFF00FFFF).copy(alpha = 0.15f)))
+                } else if (project.effect == "B&W") {
+                    Box(modifier = Modifier.fillMaxSize().background(Color.Gray.copy(alpha = 0.8f)))
+                }
             }
 
-            project.texts.forEach { text -> Text(text = text, color = Color(0xFF00FFFF), fontSize = 28.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 50.dp)) }
+            project.texts.forEach { text -> Text(text = text, color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 50.dp)) }
         }
     }
 
@@ -438,10 +457,12 @@ Column(modifier = Modifier.fillMaxSize().background(Color(0xFF090909)).statusBar
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).background(Color(0xFF121212), RoundedCornerShape(12.dp)).padding(12.dp)) {
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                 Button(onClick = { videoViewInstance?.let { if (it.isPlaying) { it.pause(); isPlaying = false } else { it.start(); isPlaying = true } } }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A1A1A)), modifier = Modifier.border(1.dp, Color(0xFF00FFFF), RoundedCornerShape(8.dp)).height(36.dp)) { Text(if (isPlaying) "⏸ Пауза" else "▶ Играть", color = Color(0xFF00FFFF), fontSize = 12.sp) }
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    listOf(0.5f, 1.0f, 1.5f, 2.0f).forEach { speed ->
-                        TextButton(onClick = { playbackSpeed = speed; mediaPlayerInstance?.let { mp -> try { val params = mp.playbackParams; params.speed = speed; mp.playbackParams = params } catch (e: Exception) {} } }, colors = ButtonDefaults.textButtonColors(contentColor = if (playbackSpeed == speed) Color.Black else Color.Gray, containerColor = if (playbackSpeed == speed) Color(0xFF00FFFF) else Color.Transparent), modifier = Modifier.size(32.dp), shape = RoundedCornerShape(8.dp)) { Text("${speed}x", fontSize = 10.sp, fontWeight = FontWeight.Bold) }
-                    }
+                
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Loop", color = Color.Gray, fontSize = 10.sp, modifier = Modifier.padding(end = 4.dp))
+                    Switch(checked = isLooping, onCheckedChange = { isLooping = it }, modifier = Modifier.scale(0.7f), colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF00FFFF)))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(onClick = { showSpeedDialog = true }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FFFF)), modifier = Modifier.height(36.dp), shape = RoundedCornerShape(8.dp)) { Text("${String.format("%.2f", playbackSpeed)}x", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
                 }
             }
             Spacer(modifier = Modifier.height(8.dp))
@@ -462,6 +483,7 @@ Column(modifier = Modifier.fillMaxSize().background(Color(0xFF090909)).statusBar
             }
         }
     }
+
     Column(modifier = Modifier.fillMaxWidth().height(80.dp).background(Color(0xFF121212)).padding(horizontal = 16.dp, vertical = 8.dp)) {
         Row(modifier = Modifier.fillMaxWidth().height(28.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Видео", color = Color.Gray, fontSize = 9.sp, modifier = Modifier.width(40.dp))
@@ -502,6 +524,24 @@ if (showTextDialog) {
     AlertDialog(onDismissRequest = { showTextDialog = false }, title = { Text("Добавить текст", color = Color.White) }, text = { OutlinedTextField(value = newText, onValueChange = { newText = it }, label = { Text("Текст") }, singleLine = true) }, confirmButton = { TextButton(onClick = { if (newText.isNotBlank()) { project = project.copy(texts = project.texts + newText); newText = ""; showTextDialog = false } }) { Text("Добавить", color = Color(0xFF00FFFF)) } }, dismissButton = { TextButton(onClick = { showTextDialog = false }) { Text("Отмена", color = Color.Gray) } })
 }
 
+if (showSpeedDialog) {
+    AlertDialog(
+        onDismissRequest = { showSpeedDialog = false },
+        title = { Text("Скорость: ${String.format("%.2f", playbackSpeed)}x", color = Color.White) },
+        text = {
+            Column {
+                Slider(value = playbackSpeed, onValueChange = { newSpeed -> playbackSpeed = newSpeed; mediaPlayerInstance?.let { mp -> try { val params = mp.playbackParams; params.speed = newSpeed; mp.playbackParams = params } catch (e: Exception) {} } }, valueRange = 0.01f..100f, colors = SliderDefaults.colors(thumbColor = Color(0xFF00FFFF), activeTrackColor = Color(0xFF00FFFF)))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    listOf(0.1f, 1.0f, 2.0f, 10.0f, 50.0f, 100.0f).forEach { spd ->
+                        TextButton(onClick = { playbackSpeed = spd; mediaPlayerInstance?.let { mp -> try { val params = mp.playbackParams; params.speed = spd; mp.playbackParams = params } catch (e: Exception) {} } }) { Text("${spd}x", color = Color.Gray, fontSize = 11.sp) }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { showSpeedDialog = false }) { Text("Готово", color = Color(0xFF00FFFF)) } }
+    )
+}
+
 if (isExporting) {
     AlertDialog(onDismissRequest = { }, title = { Text("Экспорт видео", color = Color.White) }, text = { Column { Text(text = exportFact, color = Color(0xFF00FFFF), fontSize = 14.sp, modifier = Modifier.padding(bottom = 16.dp)); LinearProgressIndicator(progress = exportProgress, modifier = Modifier.fillMaxWidth(), color = Color(0xFF00FF00), trackColor = Color.DarkGray) } }, confirmButton = { if (exportProgress >= 1f) { TextButton(onClick = { isExporting = false }) { Text("Готово", color = Color(0xFF00FF00)) } } })
 }
@@ -532,24 +572,34 @@ if (isExporting) {
                             } else if (isYes && currentProposal != null) {
                                 if (project.id == requestProjectId && currentRequestId == thisRequestId) {
                                     
-                                    // === ВЫПОЛНЕНИЕ КОМАНД ИИ (включая эффекты) ===
-                                    when (currentProposal.actionType) {
-                                        ActionType.TRIM_VIDEO -> {
-                                            val secs = currentProposal.params["endSeconds"]?.toIntOrNull() ?: 5
-                                            endTrim = secs * 1000
-                                            videoViewInstance?.seekTo(startTrim)
+                                    if (currentProposal.params.containsKey("jsonArray")) {
+                                        val array = JSONArray(currentProposal.params["jsonArray"])
+                                        for (i in 0 until array.length()) {
+                                            val cmd = array.getJSONObject(i)
+                                            when (cmd.optString("action")) {
+                                                "ADD_EFFECT" -> project = project.copy(effect = cmd.optString("effect", "Neon"))
+                                                "ADD_TEXT" -> project = project.copy(texts = project.texts + cmd.optString("text", "NEON"))
+                                                "CHANGE_SPEED" -> {
+                                                    val spd = cmd.optDouble("speed", 2.0).toFloat()
+                                                    playbackSpeed = spd
+                                                    mediaPlayerInstance?.let { mp -> try { val params = mp.playbackParams; params.speed = spd; mp.playbackParams = params } catch (e: Exception) {} }
+                                                }
+                                                "TRIM_VIDEO" -> endTrim = cmd.optInt("seconds", 5) * 1000
+                                            }
                                         }
-                                        ActionType.ADD_TEXT -> {
-                                            val txt = currentProposal.params["textContent"] ?: "NEON"
-                                            project = project.copy(texts = project.texts + txt)
+                                    } else {
+                                        when (currentProposal.actionType) {
+                                            ActionType.TRIM_VIDEO -> { val secs = currentProposal.params["endSeconds"]?.toIntOrNull() ?: 5; endTrim = secs * 1000; videoViewInstance?.seekTo(startTrim) }
+                                            ActionType.ADD_TEXT -> { project = project.copy(texts = project.texts + (currentProposal.params["textContent"] ?: "NEON")) }
+                                            ActionType.ADD_EFFECT -> { project = project.copy(effect = currentProposal.params["effectName"] ?: "Neon") }
+                                            ActionType.CHANGE_SPEED -> {
+                                                val spd = currentProposal.params["speedValue"]?.toFloatOrNull() ?: 2.0f
+                                                playbackSpeed = spd
+                                                mediaPlayerInstance?.let { mp -> try { val params = mp.playbackParams; params.speed = spd; mp.playbackParams = params } catch (e: Exception) {} }
+                                            }
+                                            else -> {} 
                                         }
-                                        ActionType.ADD_EFFECT -> {
-                                            val eff = currentProposal.params["effectName"] ?: "Neon Glow"
-                                            project = project.copy(effect = eff) // Применяем эффект к проекту
-                                        }
-                                        else -> {} 
                                     }
-                                    // =============================
 
                                     val saveRes = saveCompletedProposal(context, requestProjectId, CompletedProposal(currentProposal.copy(status = ActionStatus.CONFIRMED).id, currentProposal.actionType, ActionStatus.CONFIRMED))
                                     if (saveRes is SaveResult.Success || saveRes is SaveResult.AlreadyCompleted) {
