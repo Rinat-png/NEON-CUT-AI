@@ -39,8 +39,11 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 
-// --- МОДЕЛИ ДАННЫХ ---
 data class Project(
     val id: String, val name: String, val videoUri: String? = null,
     val audioUri: String? = null, val texts: List<String> = emptyList(),
@@ -63,56 +66,79 @@ data class AiProposal(
 data class AiResponse(val text: String, val proposal: AiProposal? = null, val errorMessage: String? = null)
 data class CompletedProposal(val id: String, val actionType: ActionType, val status: ActionStatus, val timestamp: Long = System.currentTimeMillis())
 
-// --- РЕЗУЛЬТАТЫ СОСТОЯНИЙ ---
-sealed class JournalCheckResult {
-    object Found : JournalCheckResult(); object NotFound : JournalCheckResult(); object Corrupted : JournalCheckResult(); data class Error(val message: String) : JournalCheckResult()
+sealed class JournalCheckResult { object Found : JournalCheckResult(); object NotFound : JournalCheckResult(); object Corrupted : JournalCheckResult(); data class Error(val message: String) : JournalCheckResult() }
+sealed class SaveResult { object Success : SaveResult(); object AlreadyCompleted : SaveResult(); object Conflict : SaveResult(); data class Error(val message: String) : SaveResult() }
+sealed class RecoveryResult { data class Recovered(val proposal: AiProposal?) : RecoveryResult(); data class Failed(val reason: String) : RecoveryResult() }
+sealed class ProposalLoadResult { object Absent : ProposalLoadResult(); data class Success(val proposal: AiProposal) : ProposalLoadResult(); object Corrupted : ProposalLoadResult() }
+interface AiEngine { 
+    suspend fun generateResponse(prompt: String, history: List<ChatMessage>, apiKey: String): AiResponse 
 }
-sealed class SaveResult {
-    object Success : SaveResult(); object AlreadyCompleted : SaveResult(); object Conflict : SaveResult(); data class Error(val message: String) : SaveResult()
-}
-sealed class RecoveryResult {
-    data class Recovered(val proposal: AiProposal?) : RecoveryResult(); data class Failed(val reason: String) : RecoveryResult()
-}
-sealed class ProposalLoadResult {
-    object Absent : ProposalLoadResult(); data class Success(val proposal: AiProposal) : ProposalLoadResult(); object Corrupted : ProposalLoadResult()
-}
-interface AiEngine { suspend fun generateResponse(prompt: String, history: List<ChatMessage>): AiResponse }
 
 class LocalAiEngine : AiEngine {
-    override suspend fun generateResponse(prompt: String, history: List<ChatMessage>): AiResponse {
-                    return when {
-    prompt.contains("субтитр", ignoreCase = true) -> {
-        val proposal = AiProposal(actionType = ActionType.ADD_SUBTITLES, explanation = "Демо: добавить субтитры.")
-        AiResponse("Локальный ИИ: могу добавить субтитры. Подтвердить? (Демо)", proposal)
-    }
-    prompt.contains("пауз", ignoreCase = true) -> {
-        val proposal = AiProposal(actionType = ActionType.REMOVE_SILENCE, explanation = "Демо: убрать паузы.")
-        AiResponse("Локальный ИИ: могу убрать паузы. Подтвердить? (Демо)", proposal)
-    }
-    else -> AiResponse("Локальный ИИ (демо). Попроси добавить субтитры или убрать паузы.")
-}
+    override suspend fun generateResponse(prompt: String, history: List<ChatMessage>, apiKey: String): AiResponse {
+        return when {
+            prompt.contains("субтитр", ignoreCase = true) -> {
+                val proposal = AiProposal(actionType = ActionType.ADD_SUBTITLES, explanation = "Демо: добавить субтитры.")
+                AiResponse("Локальный ИИ: могу добавить субтитры. Подтвердить? (Демо)", proposal)
+            }
+            prompt.contains("пауз", ignoreCase = true) -> {
+                val proposal = AiProposal(actionType = ActionType.REMOVE_SILENCE, explanation = "Демо: убрать паузы.")
+                AiResponse("Локальный ИИ: могу убрать паузы. Подтвердить? (Демо)", proposal)
+            }
+            else -> AiResponse("Локальный ИИ (демо). Включите 'Облачный ИИ', чтобы получить умные ответы.")
+        }
     }
 }
 
 class CloudAiEngine : AiEngine {
-    override suspend fun generateResponse(prompt: String, history: List<ChatMessage>): AiResponse {
-        if (prompt.contains("ошибка", ignoreCase = true)) throw Exception("Сбой облачного сервера")
-        return AiResponse("☁️ Облачный ИИ (демо).")
+    override suspend fun generateResponse(prompt: String, history: List<ChatMessage>, apiKey: String): AiResponse {
+        if (apiKey.isBlank()) return AiResponse(text = "Ошибка: Введите API-ключ Google Gemini в поле выше.", errorMessage = "Ключ пуст")
+        
+        return withContext(Dispatchers.IO) {
+            try {
+                val client = OkHttpClient()
+                val json = JSONObject().apply {
+                    put("contents", JSONArray().apply {
+                        put(JSONObject().apply {
+                            put("parts", JSONArray().apply { put(JSONObject().put("text", prompt)) })
+                        })
+                    })
+                }
+
+                val mediaType = "application/json; charset=utf-8".toMediaType()
+                val body = json.toString().toRequestBody(mediaType)
+
+                val request = Request.Builder()
+                    .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey")
+                    .post(body)
+                    .build()
+
+                val response = client.newCall(request).execute()
+                val responseBody = response.body?.string() ?: ""
+                
+                if (!response.isSuccessful) {
+                    return@withContext AiResponse(text = "Ошибка сети: проверьте ключ.", errorMessage = "Код ${response.code}")
+                }
+
+                val responseJson = JSONObject(responseBody)
+                val text = responseJson.getJSONArray("candidates").getJSONObject(0)
+                    .getJSONObject("content").getJSONArray("parts")
+                    .getJSONObject(0).getString("text")
+                
+                AiResponse(text = text.trim())
+            } catch (e: Exception) {
+                AiResponse(text = "Ошибка подключения к интернету.", errorMessage = e.message)
+            }
+        }
     }
 }
 
 class AiManager(private val localEngine: AiEngine, private val cloudEngine: AiEngine) {
-    suspend fun getResponse(prompt: String, history: List<ChatMessage>, allowCloud: Boolean, allowWebSearch: Boolean): AiResponse {
+    suspend fun getResponse(prompt: String, history: List<ChatMessage>, allowCloud: Boolean, apiKey: String): AiResponse {
         if (allowCloud) {
-            try {
-                val cloudRes = cloudEngine.generateResponse(prompt, history)
-                val textWithSearch = if (allowWebSearch) "${cloudRes.text}\n🌐 [Веб-поиск включен, но не реализован]" else cloudRes.text
-                return AiResponse(textWithSearch.trim(), cloudRes.proposal)
-            } catch (e: CancellationException) { throw e
-            } catch (e: Exception) { return AiResponse(text = "Ошибка облачного ИИ.", errorMessage = e.message ?: "Неизвестно") }
+            return cloudEngine.generateResponse(prompt, history, apiKey)
         } else {
-            if (allowWebSearch) return AiResponse(text = "Веб-поиск без облачного ИИ не поддерживается.")
-            return localEngine.generateResponse(prompt, history)
+            return localEngine.generateResponse(prompt, history, apiKey)
         }
     }
 }
@@ -130,22 +156,19 @@ fun internalCheckJournal(context: Context, projectId: String, proposalId: String
 fun internalLoadProposal(context: Context, projectId: String): ProposalLoadResult {
     val str = context.getSharedPreferences("neon_cut_action_$projectId", Context.MODE_PRIVATE).getString("pending_proposal", null) ?: return ProposalLoadResult.Absent
     return try {
-        val obj = JSONObject(str); val paramsMap = mutableMapOf<String, String>()
-        obj.optJSONObject("params")?.keys()?.forEach { key -> paramsMap[key] = obj.optJSONObject("params")!!.getString(key) }
-        ProposalLoadResult.Success(AiProposal(obj.getString("id"), ActionType.valueOf(obj.getString("type")), obj.getString("explanation"), ActionStatus.valueOf(obj.getString("status")), paramsMap))
+        val obj = JSONObject(str)
+        ProposalLoadResult.Success(AiProposal(obj.getString("id"), ActionType.valueOf(obj.getString("type")), obj.getString("explanation"), ActionStatus.valueOf(obj.getString("status"))))
     } catch (e: Exception) { ProposalLoadResult.Corrupted }
 }
 
 suspend fun checkJournal(context: Context, projectId: String, proposalId: String): JournalCheckResult = withContext(Dispatchers.IO) { dbMutex.withLock { internalCheckJournal(context, projectId, proposalId) } }
-suspend fun loadProposalSafe(context: Context, projectId: String): ProposalLoadResult = withContext(Dispatchers.IO) { dbMutex.withLock { internalLoadProposal(context, projectId) } }
 
 suspend fun saveCompletedProposal(context: Context, projectId: String, completed: CompletedProposal): SaveResult = withContext(Dispatchers.IO) {
     dbMutex.withLock {
         val prefs = context.getSharedPreferences("neon_cut_journal_$projectId", Context.MODE_PRIVATE)
         val rawString = prefs.getString("journal", "[]") ?: "[]"
         val oldArray = try { JSONArray(rawString) } catch (e: Exception) {
-            val backupSuccess = prefs.edit().putString("journal_corrupt_backup_${System.currentTimeMillis()}", rawString).commit()
-            if (!backupSuccess) return@withLock SaveResult.Error("Ошибка бэкапа")
+            prefs.edit().putString("journal_corrupt_backup_${System.currentTimeMillis()}", rawString).commit()
             return@withLock SaveResult.Error("Журнал поврежден")
         }
         val cleanArray = JSONArray(); var existingStatus: String? = null
@@ -157,8 +180,7 @@ suspend fun saveCompletedProposal(context: Context, projectId: String, completed
             } catch (e: Exception) { return@withLock SaveResult.Error("Журнал содержит ошибки") }
         }
         if (existingStatus != null) return@withLock if (existingStatus == completed.status.name) SaveResult.AlreadyCompleted else SaveResult.Conflict
-        val newObj = JSONObject().put("id", completed.id).put("type", completed.actionType.name).put("status", completed.status.name).put("timestamp", completed.timestamp)
-        cleanArray.put(newObj)
+        cleanArray.put(JSONObject().put("id", completed.id).put("type", completed.actionType.name).put("status", completed.status.name).put("timestamp", completed.timestamp))
         if (prefs.edit().putString("journal", cleanArray.toString()).commit()) SaveResult.Success else SaveResult.Error("Ошибка commit")
     }
 }
@@ -168,10 +190,7 @@ suspend fun saveProposal(context: Context, projectId: String, proposal: AiPropos
         val prefs = context.getSharedPreferences("neon_cut_action_$projectId", Context.MODE_PRIVATE)
         try {
             if (proposal == null) prefs.edit().remove("pending_proposal").commit()
-            else {
-                val obj = JSONObject().put("id", proposal.id).put("type", proposal.actionType.name).put("explanation", proposal.explanation).put("status", proposal.status.name)
-                prefs.edit().putString("pending_proposal", obj.toString()).commit()
-            }
+            else prefs.edit().putString("pending_proposal", JSONObject().put("id", proposal.id).put("type", proposal.actionType.name).put("explanation", proposal.explanation).put("status", proposal.status.name).toString()).commit()
         } catch (e: Exception) { false }
     }
 }
@@ -183,29 +202,19 @@ suspend fun setNeedsRecovery(context: Context, projectId: String, value: Boolean
 suspend fun recoverPendingProposal(context: Context, projectId: String): RecoveryResult = withContext(Dispatchers.IO) {
     dbMutex.withLock {
         val prefsAction = context.getSharedPreferences("neon_cut_action_$projectId", Context.MODE_PRIVATE)
-        val needsRecovery = prefsAction.getBoolean("needs_recovery", false)
         val pendingResult = internalLoadProposal(context, projectId)
         if (pendingResult is ProposalLoadResult.Corrupted) return@withLock RecoveryResult.Failed("Proposal поврежден")
-        
-        if (needsRecovery) {
-            if (pendingResult is ProposalLoadResult.Success) {
-                val journalCheck = internalCheckJournal(context, projectId, pendingResult.proposal.id)
-                if (journalCheck is JournalCheckResult.Found) {
-                    if (!prefsAction.edit().remove("pending_proposal").remove("needs_recovery").commit()) return@withLock RecoveryResult.Failed("Ошибка очистки")
-                    return@withLock RecoveryResult.Recovered(null)
-                } else return@withLock RecoveryResult.Failed("Неоднозначное состояние журнала")
-            } else if (pendingResult is ProposalLoadResult.Absent) {
-                if (!prefsAction.edit().remove("needs_recovery").commit()) return@withLock RecoveryResult.Failed("Ошибка очистки флага")
-                return@withLock RecoveryResult.Recovered(null)
-            }
+        if (prefsAction.getBoolean("needs_recovery", false)) {
+            if (!prefsAction.edit().remove("pending_proposal").remove("needs_recovery").commit()) return@withLock RecoveryResult.Failed("Ошибка очистки")
+            return@withLock RecoveryResult.Recovered(null)
         }
         when (pendingResult) {
             is ProposalLoadResult.Success -> {
-                val journalCheck = internalCheckJournal(context, projectId, pendingResult.proposal.id)
-                if (journalCheck is JournalCheckResult.Found) {
+                val check = internalCheckJournal(context, projectId, pendingResult.proposal.id)
+                if (check is JournalCheckResult.Found) {
                     if (!prefsAction.edit().remove("pending_proposal").commit()) return@withLock RecoveryResult.Failed("Ошибка очистки")
                     RecoveryResult.Recovered(null)
-                } else if (journalCheck is JournalCheckResult.Corrupted || journalCheck is JournalCheckResult.Error) RecoveryResult.Failed("Ошибка журнала")
+                } else if (check is JournalCheckResult.Corrupted) RecoveryResult.Failed("Ошибка журнала")
                 else RecoveryResult.Recovered(pendingResult.proposal)
             }
             else -> RecoveryResult.Recovered(null)
@@ -335,7 +344,7 @@ fun EditorScreen(initialProject: Project, onBackClick: (Project) -> Unit) {
     
     var showAiDialog by remember { mutableStateOf(false) }
     var allowCloud by remember { mutableStateOf(false) }
-    var allowWebSearch by remember { mutableStateOf(false) }
+    var apiKey by remember { mutableStateOf(context.getSharedPreferences("neon_prefs", Context.MODE_PRIVATE).getString("gemini_key", "") ?: "") }
     
     var pendingProposal by remember(project.id) { mutableStateOf<AiProposal?>(null) }
     var aiMessages by remember(project.id) { mutableStateOf(loadChatHistory(context, project.id)) }
@@ -347,7 +356,7 @@ fun EditorScreen(initialProject: Project, onBackClick: (Project) -> Unit) {
     
     val coroutineScope = rememberCoroutineScope()
     val aiManager = remember { AiManager(LocalAiEngine(), CloudAiEngine()) }
-    val facts = listOf("Это приложение пишется прямо на телефоне!", "NEON CUT AI использует нативные технологии Android.", "Первый видеоредактор появился еще в 1971 году!", "Твой телефон TECNO отлично справляется с задачей!")
+    val facts = listOf("Это приложение пишется прямо на телефоне!", "NEON CUT AI использует нативные технологии Android.", "Первый видеоредактор появился еще в 1971 году!", "Твой телефон отлично справляется с задачей!")
 
     LaunchedEffect(project.id) {
         when (val rec = recoverPendingProposal(context, project.id)) {
@@ -383,83 +392,92 @@ fun EditorScreen(initialProject: Project, onBackClick: (Project) -> Unit) {
     }
 
     Column(modifier = Modifier.fillMaxSize().background(Color(0xFF090909))) {
-        Row(modifier = Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            TextButton(onClick = { onBackClick(project.copy(startTrim = startTrim, endTrim = endTrim)) }) { Text("< Назад", color = Color(0xFF00FFFF), fontSize = 14.sp) }
-            Row {
-                Button(onClick = { videoPicker.launch("video/*") }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FFFF)), contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp), modifier = Modifier.height(32.dp)) { Text("Видео", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
-                Spacer(modifier = Modifier.width(4.dp))
-                Button(onClick = { audioPicker.launch("audio/*") }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF00FF)), contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp), modifier = Modifier.height(32.dp)) { Text("Музыка", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
-                Spacer(modifier = Modifier.width(4.dp))
-                Button(onClick = { showTextDialog = true }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A1A1A)), contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp), modifier = Modifier.height(32.dp).border(1.dp, Color(0xFF00FFFF), RoundedCornerShape(20.dp))) { Text("Текст", color = Color(0xFF00FFFF), fontSize = 11.sp) }
-                Spacer(modifier = Modifier.width(4.dp))
-                Button(onClick = { showAiDialog = true }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A1A1A)), contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp), modifier = Modifier.height(32.dp).border(1.dp, Color(0xFFFF00FF), RoundedCornerShape(20.dp))) { Text("ИИ", color = Color(0xFFFF00FF), fontSize = 11.sp, fontWeight = FontWeight.Bold) }
-                Spacer(modifier = Modifier.width(4.dp))
-                Button(onClick = { isExporting = true }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FF00)), contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp), modifier = Modifier.height(32.dp)) { Text("Сохр.", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
-            }
-        }
+Row(modifier = Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+    TextButton(onClick = { onBackClick(project.copy(startTrim = startTrim, endTrim = endTrim)) }) { Text("< Назад", color = Color(0xFF00FFFF), fontSize = 14.sp) }
+    Button(onClick = { isExporting = true }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FF00)), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp), modifier = Modifier.height(32.dp)) { Text("Экспорт", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+}
 
-        Box(modifier = Modifier.fillMaxWidth().weight(1f).padding(16.dp).background(Color.Black), contentAlignment = Alignment.Center) {
-            if (project.videoUri == null) {
-                Text("Окно предпросмотра\n(Импортируйте видео)", color = Color.DarkGray, textAlign = TextAlign.Center)
-            } else {
-                AndroidView(factory = { ctx ->
-                    VideoView(ctx).apply {
-                        setVideoURI(Uri.parse(project.videoUri))
-                        setOnPreparedListener { mp ->
-                            videoDuration = mp.duration; if (endTrim == 0) endTrim = mp.duration
-                            videoViewInstance = this; mediaPlayerInstance = mp; seekTo(startTrim)
-                            try { val params = mp.playbackParams; params.speed = playbackSpeed; mp.playbackParams = params } catch (e: Exception) {}
-                            start(); isPlaying = true
-                        }
-                        setOnCompletionListener { isPlaying = false }
-                        start()
-                    }
-                }, modifier = Modifier.fillMaxSize())
-                project.texts.forEach { text -> Text(text = text, color = Color(0xFF00FFFF), fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 50.dp)) }
+Box(modifier = Modifier.fillMaxWidth().weight(1f).padding(16.dp).background(Color.Black), contentAlignment = Alignment.Center) {
+    if (project.videoUri == null) {
+        Text("Окно предпросмотра\n(Импортируйте видео)", color = Color.DarkGray, textAlign = TextAlign.Center)
+    } else {
+        AndroidView(factory = { ctx ->
+            VideoView(ctx).apply {
+                setVideoURI(Uri.parse(project.videoUri))
+                setOnPreparedListener { mp ->
+                    videoDuration = mp.duration; if (endTrim == 0) endTrim = mp.duration
+                    videoViewInstance = this; mediaPlayerInstance = mp; seekTo(startTrim)
+                    try { val params = mp.playbackParams; params.speed = playbackSpeed; mp.playbackParams = params } catch (e: Exception) {}
+                    start(); isPlaying = true
+                }
+                setOnCompletionListener { isPlaying = false }
+                start()
             }
-        }
-        if (project.videoUri != null) {
-            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                    Button(onClick = { videoViewInstance?.let { if (it.isPlaying) { it.pause(); isPlaying = false } else { it.start(); isPlaying = true } } }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A1A1A)), modifier = Modifier.border(1.dp, Color(0xFF00FFFF), RoundedCornerShape(20.dp))) { Text(if (isPlaying) "⏸ Пауза" else "▶ Играть", color = Color(0xFF00FFFF), fontSize = 12.sp) }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    listOf(0.5f, 1.0f, 1.5f, 2.0f).forEach { speed ->
-                        TextButton(onClick = { playbackSpeed = speed; mediaPlayerInstance?.let { mp -> try { val params = mp.playbackParams; params.speed = speed; mp.playbackParams = params } catch (e: Exception) {} } }, colors = ButtonDefaults.textButtonColors(contentColor = if (playbackSpeed == speed) Color(0xFF00FFFF) else Color.Gray)) { Text("${speed}x", fontSize = 12.sp) }
-                    }
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(formatTime(videoPosition), color = Color.Gray, fontSize = 12.sp)
-                    Slider(value = videoPosition.toFloat(), onValueChange = { videoPosition = it.toInt(); videoViewInstance?.seekTo(it.toInt()) }, valueRange = 0f..(if (videoDuration > 0) videoDuration.toFloat() else 1f), modifier = Modifier.weight(1f).padding(horizontal = 8.dp))
-                    Text(formatTime(videoDuration), color = Color.Gray, fontSize = 12.sp)
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Нач: ${formatTime(startTrim)}", color = Color(0xFF00FFFF), fontSize = 11.sp)
-                    Slider(value = startTrim.toFloat(), onValueChange = { if (it < endTrim) { startTrim = it.toInt(); videoViewInstance?.seekTo(startTrim) } }, valueRange = 0f..(if (videoDuration > 0) videoDuration.toFloat() else 1f), modifier = Modifier.weight(1f).padding(horizontal = 8.dp))
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Кон: ${formatTime(endTrim)}", color = Color(0xFFFF00FF), fontSize = 11.sp)
-                    Slider(value = endTrim.toFloat(), onValueChange = { if (it > startTrim) { endTrim = it.toInt() } }, valueRange = 0f..(if (videoDuration > 0) videoDuration.toFloat() else 1f), modifier = Modifier.weight(1f).padding(horizontal = 8.dp))
+        }, modifier = Modifier.fillMaxSize())
+        project.texts.forEach { text -> Text(text = text, color = Color(0xFF00FFFF), fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 50.dp)) }
+    }
+}
+    if (project.videoUri != null) {
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                Button(onClick = { videoViewInstance?.let { if (it.isPlaying) { it.pause(); isPlaying = false } else { it.start(); isPlaying = true } } }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A1A1A)), modifier = Modifier.border(1.dp, Color(0xFF00FFFF), RoundedCornerShape(20.dp))) { Text(if (isPlaying) "⏸ Пауза" else "▶ Играть", color = Color(0xFF00FFFF), fontSize = 12.sp) }
+                Spacer(modifier = Modifier.width(8.dp))
+                listOf(0.5f, 1.0f, 1.5f, 2.0f).forEach { speed ->
+                    TextButton(onClick = { playbackSpeed = speed; mediaPlayerInstance?.let { mp -> try { val params = mp.playbackParams; params.speed = speed; mp.playbackParams = params } catch (e: Exception) {} } }, colors = ButtonDefaults.textButtonColors(contentColor = if (playbackSpeed == speed) Color(0xFF00FFFF) else Color.Gray)) { Text("${speed}x", fontSize = 12.sp) }
                 }
             }
-        }
-
-        Column(modifier = Modifier.fillMaxWidth().height(100.dp).background(Color(0xFF121212)).padding(8.dp)) {
-            Row(modifier = Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("V", color = Color.Gray, fontSize = 10.sp, modifier = Modifier.width(20.dp))
-                Box(modifier = Modifier.fillMaxHeight().width(180.dp).background(Color(0xFF00FFFF).copy(alpha = 0.2f), RoundedCornerShape(4.dp)).border(1.dp, Color(0xFF00FFFF), RoundedCornerShape(4.dp)), contentAlignment = Alignment.Center) {
-                    if (project.videoUri != null) Text("Видео: ${formatTime(endTrim - startTrim)}", color = Color.White, fontSize = 10.sp) else Text("Пусто", color = Color.DarkGray, fontSize = 10.sp)
-                }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(formatTime(videoPosition), color = Color.Gray, fontSize = 12.sp)
+                Slider(value = videoPosition.toFloat(), onValueChange = { videoPosition = it.toInt(); videoViewInstance?.seekTo(it.toInt()) }, valueRange = 0f..(if (videoDuration > 0) videoDuration.toFloat() else 1f), modifier = Modifier.weight(1f).padding(horizontal = 8.dp))
+                Text(formatTime(videoDuration), color = Color.Gray, fontSize = 12.sp)
             }
-            Spacer(modifier = Modifier.height(4.dp))
-            Row(modifier = Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("A", color = Color.Gray, fontSize = 10.sp, modifier = Modifier.width(20.dp))
-                Box(modifier = Modifier.fillMaxHeight().width(220.dp).background(Color(0xFFFF00FF).copy(alpha = 0.2f), RoundedCornerShape(4.dp)).border(1.dp, Color(0xFFFF00FF), RoundedCornerShape(4.dp)), contentAlignment = Alignment.Center) {
-                    if (project.audioUri != null) Text("Аудио трек", color = Color.White, fontSize = 10.sp) else Text("Нет музыки", color = Color.DarkGray, fontSize = 10.sp)
-                }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Нач: ${formatTime(startTrim)}", color = Color(0xFF00FFFF), fontSize = 11.sp)
+                Slider(value = startTrim.toFloat(), onValueChange = { if (it < endTrim) { startTrim = it.toInt(); videoViewInstance?.seekTo(startTrim) } }, valueRange = 0f..(if (videoDuration > 0) videoDuration.toFloat() else 1f), modifier = Modifier.weight(1f).padding(horizontal = 8.dp))
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Кон: ${formatTime(endTrim)}", color = Color(0xFFFF00FF), fontSize = 11.sp)
+                Slider(value = endTrim.toFloat(), onValueChange = { if (it > startTrim) { endTrim = it.toInt() } }, valueRange = 0f..(if (videoDuration > 0) videoDuration.toFloat() else 1f), modifier = Modifier.weight(1f).padding(horizontal = 8.dp))
             }
         }
     }
 
+    // НИЖНЯЯ ПАНЕЛЬ ИНСТРУМЕНТОВ (как в CapCut)
+    Row(modifier = Modifier.fillMaxWidth().padding(8.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Button(onClick = { videoPicker.launch("video/*") }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FFFF)), contentPadding = PaddingValues(0.dp), modifier = Modifier.size(48.dp), shape = RoundedCornerShape(12.dp)) { Text("V", color = Color.Black, fontWeight = FontWeight.Bold) }
+            Text("Видео", color = Color.White, fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Button(onClick = { audioPicker.launch("audio/*") }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF00FF)), contentPadding = PaddingValues(0.dp), modifier = Modifier.size(48.dp), shape = RoundedCornerShape(12.dp)) { Text("M", color = Color.White, fontWeight = FontWeight.Bold) }
+            Text("Музыка", color = Color.White, fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Button(onClick = { showTextDialog = true }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A1A1A)), contentPadding = PaddingValues(0.dp), modifier = Modifier.size(48.dp).border(1.dp, Color(0xFF00FFFF), RoundedCornerShape(12.dp)), shape = RoundedCornerShape(12.dp)) { Text("T", color = Color(0xFF00FFFF), fontWeight = FontWeight.Bold) }
+            Text("Текст", color = Color.White, fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Button(onClick = { showAiDialog = true }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A1A1A)), contentPadding = PaddingValues(0.dp), modifier = Modifier.size(48.dp).border(1.dp, Color(0xFFFF00FF), RoundedCornerShape(12.dp)), shape = RoundedCornerShape(12.dp)) { Text("ИИ", color = Color(0xFFFF00FF), fontWeight = FontWeight.Bold) }
+            Text("ИИ", color = Color.White, fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxWidth().height(80.dp).background(Color(0xFF121212)).padding(8.dp)) {
+        Row(modifier = Modifier.fillMaxWidth().height(30.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("V", color = Color.Gray, fontSize = 10.sp, modifier = Modifier.width(20.dp))
+            Box(modifier = Modifier.fillMaxHeight().width(180.dp).background(Color(0xFF00FFFF).copy(alpha = 0.2f), RoundedCornerShape(4.dp)).border(1.dp, Color(0xFF00FFFF), RoundedCornerShape(4.dp)), contentAlignment = Alignment.Center) {
+                if (project.videoUri != null) Text("Видео: ${formatTime(endTrim - startTrim)}", color = Color.White, fontSize = 10.sp) else Text("Пусто", color = Color.DarkGray, fontSize = 10.sp)
+            }
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Row(modifier = Modifier.fillMaxWidth().height(30.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("A", color = Color.Gray, fontSize = 10.sp, modifier = Modifier.width(20.dp))
+            Box(modifier = Modifier.fillMaxHeight().width(220.dp).background(Color(0xFFFF00FF).copy(alpha = 0.2f), RoundedCornerShape(4.dp)).border(1.dp, Color(0xFFFF00FF), RoundedCornerShape(4.dp)), contentAlignment = Alignment.Center) {
+                if (project.audioUri != null) Text("Аудио трек", color = Color.White, fontSize = 10.sp) else Text("Нет музыки", color = Color.DarkGray, fontSize = 10.sp)
+            }
+        }
+    }
+}
     if (showTextDialog) {
         AlertDialog(onDismissRequest = { showTextDialog = false }, title = { Text("Добавить текст", color = Color.White) }, text = { OutlinedTextField(value = newText, onValueChange = { newText = it }, label = { Text("Текст") }, singleLine = true) }, confirmButton = { TextButton(onClick = { if (newText.isNotBlank()) { project = project.copy(texts = project.texts + newText); newText = ""; showTextDialog = false } }) { Text("Добавить", color = Color(0xFF00FFFF)) } }, dismissButton = { TextButton(onClick = { showTextDialog = false }) { Text("Отмена", color = Color.Gray) } })
     }
@@ -472,7 +490,10 @@ fun EditorScreen(initialProject: Project, onBackClick: (Project) -> Unit) {
         AiAssistantDialog(
             onDismiss = { showAiDialog = false }, aiMessages = aiMessages, isAiLoading = isAiLoading,
             allowCloud = allowCloud, onCloudChange = { allowCloud = it },
-            allowWebSearch = allowWebSearch, onWebSearchChange = { allowWebSearch = it },
+            apiKey = apiKey, onApiKeyChange = { newKey -> 
+                apiKey = newKey
+                context.getSharedPreferences("neon_prefs", Context.MODE_PRIVATE).edit().putString("gemini_key", newKey).apply()
+            },
             onSendMessage = { text ->
                 if (text.isNotBlank() && !isAiLoading) {
                     val requestProjectId = project.id; val requestProposalId = pendingProposal?.id; val thisRequestId = UUID.randomUUID().toString()
@@ -517,7 +538,7 @@ fun EditorScreen(initialProject: Project, onBackClick: (Project) -> Unit) {
                                     } else { saveErrorMessage = "Ошибка записи."; aiResponse = AiResponse("Сбой.") }
                                 } else { aiResponse = AiResponse("Устарел.") }
                             } else if (currentProposal != null && !isYes && !isNo) { aiResponse = AiResponse("Сначала подтвердите ('да') или отмените ('нет').")
-                            } else { aiResponse = aiManager.getResponse(text, updatedMessages, allowCloud, allowWebSearch) }
+                            } else { aiResponse = aiManager.getResponse(text, updatedMessages, allowCloud, apiKey) }
 
                             if (project.id == requestProjectId && currentRequestId == thisRequestId) {
                                 if (systemMessage != null) updatedMessages = updatedMessages + ChatMessage(systemMessage, false)
@@ -550,7 +571,8 @@ fun EditorScreen(initialProject: Project, onBackClick: (Project) -> Unit) {
 @Composable
 fun AiAssistantDialog(
     onDismiss: () -> Unit, aiMessages: List<ChatMessage>, isAiLoading: Boolean,
-    allowCloud: Boolean, onCloudChange: (Boolean) -> Unit, allowWebSearch: Boolean, onWebSearchChange: (Boolean) -> Unit,
+    allowCloud: Boolean, onCloudChange: (Boolean) -> Unit,
+    apiKey: String, onApiKeyChange: (String) -> Unit,
     onSendMessage: (String) -> Unit
 ) {
     var userInput by remember { mutableStateOf("") }
@@ -563,14 +585,19 @@ fun AiAssistantDialog(
     AlertDialog(
         onDismissRequest = onDismiss, title = { Text("ИИ-Ассистент", color = Color(0xFFFF00FF), fontWeight = FontWeight.Bold) },
         text = {
-            Column(modifier = Modifier.height(300.dp).fillMaxWidth()) {
+            Column(modifier = Modifier.height(320.dp).fillMaxWidth()) {
                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Облачный ИИ", color = Color.Gray, fontSize = 11.sp, modifier = Modifier.weight(1f))
+                    Text("Облачный ИИ (Gemini)", color = Color.Gray, fontSize = 11.sp, modifier = Modifier.weight(1f))
                     Switch(checked = allowCloud, onCheckedChange = onCloudChange, colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF00FFFF)))
                 }
-                Row(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Веб-поиск", color = Color.Gray, fontSize = 11.sp, modifier = Modifier.weight(1f))
-                    Switch(checked = allowWebSearch, onCheckedChange = onWebSearchChange, colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFFFF00FF)))
+                if (allowCloud) {
+                    OutlinedTextField(
+                        value = apiKey, onValueChange = onApiKeyChange,
+                        label = { Text("API Key (Google AI Studio)", fontSize = 10.sp) },
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                        singleLine = true,
+                        textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
+                    )
                 }
                 LazyColumn(state = listState, modifier = Modifier.weight(1f)) {
                     items(aiMessages) { msg ->
