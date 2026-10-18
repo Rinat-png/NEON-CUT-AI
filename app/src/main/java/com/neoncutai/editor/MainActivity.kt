@@ -72,17 +72,17 @@ class LocalAiEngine : AiEngine {
         val lower = prompt.lowercase()
         return when {
             lower.contains("эффект") || lower.contains("свечен") || lower.contains("неон") -> {
-                val p = AiProposal(ActionType.ADD_EFFECT, "Демо: добавить неоновый эффект.", params = mapOf("effectName" to "Neon Glow"))
+                val p = AiProposal(actionType = ActionType.ADD_EFFECT, explanation = "Демо: добавить неоновый эффект.", params = mapOf("effectName" to "Neon Glow"))
                 AiResponse("Я могу добавить неоновое свечение. Подтвердить?", p)
             }
             lower.contains("обрежь") || lower.contains("оставь") -> {
                 val num = Regex("\\d+").find(prompt)?.value?.toIntOrNull() ?: 5
-                val p = AiProposal(ActionType.TRIM_VIDEO, "Демо: обрезать видео до $num секунд.", params = mapOf("endSeconds" to num.toString()))
+                val p = AiProposal(actionType = ActionType.TRIM_VIDEO, explanation = "Демо: обрезать видео до $num секунд.", params = mapOf("endSeconds" to num.toString()))
                 AiResponse("Я могу обрезать видео до $num секунд. Подтвердить?", p)
             }
             lower.contains("текст") || lower.contains("надпись") -> {
                 val txt = prompt.split(" ").lastOrNull() ?: "NEON"
-                val p = AiProposal(ActionType.ADD_TEXT, "Демо: добавить текст '$txt'.", params = mapOf("textContent" to txt))
+                val p = AiProposal(actionType = ActionType.ADD_TEXT, explanation = "Демо: добавить текст '$txt'.", params = mapOf("textContent" to txt))
                 AiResponse("Я могу добавить текст '$txt'. Подтвердить?", p)
             }
             else -> AiResponse("Локальный ИИ. Попроси меня: 'обрежь до 5 секунд', 'добавь текст Привет' или 'добавь неоновый эффект'.")
@@ -115,15 +115,15 @@ class CloudAiEngine : AiEngine {
                     when (cmd.optString("action")) {
                         "ADD_EFFECT" -> {
                             val eff = cmd.optString("effect", "Neon")
-                            return@withContext AiResponse("Я добавлю неоновый эффект. Подтвердить?", AiProposal(ActionType.ADD_EFFECT, "Облачный ИИ: добавить эффект", params = mapOf("effectName" to eff)))
+                            return@withContext AiResponse("Я добавлю неоновый эффект. Подтвердить?", AiProposal(actionType = ActionType.ADD_EFFECT, explanation = "Облачный ИИ: добавить эффект", params = mapOf("effectName" to eff)))
                         }
                         "TRIM_VIDEO" -> {
                             val s = cmd.optInt("seconds", 5)
-                            return@withContext AiResponse("Я обрежу видео до $s секунд. Подтвердить?", AiProposal(ActionType.TRIM_VIDEO, "Облачный ИИ: обрезать", params = mapOf("endSeconds" to s.toString())))
+                            return@withContext AiResponse("Я обрежу видео до $s секунд. Подтвердить?", AiProposal(actionType = ActionType.TRIM_VIDEO, explanation = "Облачный ИИ: обрезать", params = mapOf("endSeconds" to s.toString())))
                         }
                         "ADD_TEXT" -> {
                             val t = cmd.optString("text", "NEON")
-                            return@withContext AiResponse("Добавлю текст '$t'. Подтвердить?", AiProposal(ActionType.ADD_TEXT, "Облачный ИИ: текст", params = mapOf("textContent" to t)))
+                            return@withContext AiResponse("Добавлю текст '$t'. Подтвердить?", AiProposal(actionType = ActionType.ADD_TEXT, explanation = "Облачный ИИ: текст", params = mapOf("textContent" to t)))
                         }
                     }
                 }
@@ -132,6 +132,8 @@ class CloudAiEngine : AiEngine {
         }
     }
 }
+
+
 
 class AiManager(private val local: AiEngine, private val cloud: AiEngine) {
     suspend fun getResponse(prompt: String, history: List<ChatMessage>, allowCloud: Boolean, apiKey: String): AiResponse {
