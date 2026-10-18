@@ -323,7 +323,6 @@ fun ProjectScreen(projects: List<Project>, onProjectClick: (Project) -> Unit, on
         )
     }
 }
-@Composable
 
 
 
