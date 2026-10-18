@@ -12,8 +12,8 @@ android {
         applicationId = "com.neoncutai.editor"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = (System.currentTimeMillis() / 1000).toInt()
+versionName = "1.0.${(System.currentTimeMillis() / 10000)}"
     }
 
     buildTypes {
