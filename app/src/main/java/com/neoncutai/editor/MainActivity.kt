@@ -258,6 +258,7 @@ fun EditorScreen(initialProject: Project, onBackClick: (Project) -> Unit) {
     var videoViewInstance by remember { mutableStateOf<VideoView?>(null) }
     
     var videoPosition by rememberSaveable(project.id) { mutableStateOf(0) }
+    var splitPoints by rememberSaveable(project.id) { mutableStateOf(listOf<Int>()) }
     var startTrim by rememberSaveable(project.id) { mutableStateOf(project.startTrim) }
     var endTrim by rememberSaveable(project.id) { mutableStateOf(project.endTrim) }
     var playbackSpeed by rememberSaveable(project.id) { mutableStateOf(1.0f) }
@@ -409,25 +410,66 @@ if (project.videoUri != null) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Кон", color = Color(0xFFFF00FF), fontSize = 11.sp, modifier = Modifier.width(30.dp))
             Slider(value = endTrim.toFloat(), onValueChange = { if (it > startTrim) { endTrim = it.toInt() } }, valueRange = 0f..(if (videoDuration > 0) videoDuration.toFloat() else 1f), modifier = Modifier.weight(1f), colors = SliderDefaults.colors(thumbColor = Color(0xFFFF00FF), activeTrackColor = Color(0xFFFF00FF).copy(alpha = 0.5f)))
-            Text(formatTime(endTrim), color = Color.White, fontSize = 11.sp, modifier = Modifier.width(40.dp), textAlign = TextAlign.End)
-        }
-    }
-}
-
-
-
-    Column(modifier = Modifier.fillMaxWidth().height(80.dp).background(Color(0xFF121212)).padding(horizontal = 16.dp, vertical = 8.dp)) {
-        Row(modifier = Modifier.fillMaxWidth().height(28.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Видео", color = Color.Gray, fontSize = 9.sp, modifier = Modifier.width(40.dp))
-            Box(modifier = Modifier.fillMaxHeight().width(if (project.videoUri != null) 150.dp else 80.dp).background(Color(0xFF00FFFF).copy(alpha = 0.2f), RoundedCornerShape(4.dp)).border(1.dp, Color(0xFF00FFFF), RoundedCornerShape(4.dp)), contentAlignment = Alignment.Center) {
-                if (project.videoUri != null) Text(formatTime(endTrim - startTrim), color = Color.White, fontSize = 10.sp) else Text("Пусто", color = Color.DarkGray, fontSize = 10.sp)
+            Text(formatTime(endTrim), color = Color.White, fontSize = 11.    Column(
+        modifier = Modifier.fillMaxWidth().background(Color(0xFF111318)).padding(horizontal = 12.dp, vertical = 8.dp)
+    ) {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("МНОГОДОРОЖЕЧНЫЙ ТАЙМЛАЙН", color = Color(0xFF9AA4B2), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(
+                    onClick = {
+                        if (project.videoUri != null && videoDuration > 0 && videoPosition > startTrim && videoPosition < endTrim && splitPoints.size < 20) {
+                            splitPoints = (splitPoints + videoPosition).distinct().sorted()
+                        }
+                    },
+                    enabled = project.videoUri != null && videoDuration > 0 && videoPosition > startTrim && videoPosition < endTrim
+                ) { Text("✂ Разрезать", color = Color(0xFF00E5FF), fontSize = 11.sp) }
+                TextButton(onClick = { splitPoints = splitPoints.dropLast(1) }, enabled = splitPoints.isNotEmpty()) {
+                    Text("Отменить", color = Color.LightGray, fontSize = 10.sp)
+                }
             }
         }
-        Spacer(modifier = Modifier.height(4.dp))
+        Row(modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(formatTime(startTrim), color = Color.Gray, fontSize = 9.sp)
+            Text("▶ ${formatTime(videoPosition)}", color = Color(0xFF00E5FF), fontSize = 9.sp)
+            Text(formatTime(if (endTrim > 0) endTrim else videoDuration), color = Color.Gray, fontSize = 9.sp)
+        }
+        val cuts = (listOf(startTrim) + splitPoints.filter { it > startTrim && it < endTrim } + listOf(if (endTrim > startTrim) endTrim else videoDuration)).distinct().sorted()
+        Row(modifier = Modifier.fillMaxWidth().height(34.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("V1", color = Color(0xFF00E5FF), fontSize = 10.sp, modifier = Modifier.width(28.dp))
+            if (project.videoUri == null) {
+                Box(modifier = Modifier.weight(1f).fillMaxHeight().background(Color(0xFF252A32), RoundedCornerShape(5.dp)), contentAlignment = Alignment.Center) {
+                    Text("Добавьте видео", color = Color.Gray, fontSize = 10.sp)
+                }
+            } else {
+                Row(modifier = Modifier.weight(1f).fillMaxHeight(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    val segmentCount = (cuts.size - 1).coerceAtLeast(1)
+                    repeat(segmentCount) { index ->
+                        Box(modifier = Modifier.weight(1f).fillMaxHeight().background(Color(0xFF087F8C), RoundedCornerShape(4.dp)).border(1.dp, Color(0xFF00E5FF), RoundedCornerShape(4.dp)), contentAlignment = Alignment.Center) {
+                            Text("Клип ${index + 1}", color = Color.White, fontSize = 9.sp)
+                        }
+                    }
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(5.dp))
         Row(modifier = Modifier.fillMaxWidth().height(28.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Аудио", color = Color.Gray, fontSize = 9.sp, modifier = Modifier.width(40.dp))
-            Box(modifier = Modifier.fillMaxHeight().width(if (project.audioUri != null) 180.dp else 80.dp).background(Color(0xFFFF00FF).copy(alpha = 0.2f), RoundedCornerShape(4.dp)).border(1.dp, Color(0xFFFF00FF), RoundedCornerShape(4.dp)), contentAlignment = Alignment.Center) {
-                if (project.audioUri != null) Text("Музыка", color = Color.White, fontSize = 10.sp) else Text("Нет", color = Color.DarkGray, fontSize = 10.sp)
+            Text("A1", color = Color(0xFFFF66D9), fontSize = 10.sp, modifier = Modifier.width(28.dp))
+            Box(modifier = Modifier.weight(1f).fillMaxHeight().background(if (project.audioUri != null) Color(0xFF762C69) else Color(0xFF252A32), RoundedCornerShape(4.dp)).border(1.dp, Color(0xFFFF66D9).copy(alpha = 0.7f), RoundedCornerShape(4.dp)), contentAlignment = Alignment.Center) {
+                Text(if (project.audioUri != null) "Аудиоклип" else "Добавьте аудио", color = Color.White, fontSize = 9.sp)
+            }
+        }
+        Spacer(modifier = Modifier.height(5.dp))
+        Row(modifier = Modifier.fillMaxWidth().height(28.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("T1", color = Color(0xFFFFC857), fontSize = 10.sp, modifier = Modifier.width(28.dp))
+            Box(modifier = Modifier.weight(1f).fillMaxHeight().background(if (project.texts.isNotEmpty()) Color(0xFF72551C) else Color(0xFF252A32), RoundedCornerShape(4.dp)).border(1.dp, Color(0xFFFFC857).copy(alpha = 0.7f), RoundedCornerShape(4.dp)), contentAlignment = Alignment.Center) {
+                Text(if (project.texts.isNotEmpty()) "Текстовых слоёв: ${project.texts.size}" else "Текстовые слои", color = Color.White, fontSize = 9.sp)
+            }
+        }
+        if (splitPoints.isNotEmpty()) {
+            Text("Метки разреза: ${splitPoints.joinToString { formatTime(it) }}", color = Color.Gray, fontSize = 9.sp, modifier = Modifier.padding(top = 5.dp))
+        }
+    }se Text("Нет", color = Color.DarkGray, fontSize = 10.sp)
             }
         }
     }
